@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — Stage 4 at checkpoint (stop; no further work without owner direction). FS-009B: release candidate RC1 built, zipped and extracted; startup of the extracted executable observed; the full playthrough and death/restart are pending the owner, so FS-009B is IMPLEMENTED, not PACKAGED_VERIFIED. **Blockers** — none. Spend: Stage 4 estimate about $1 of the $3 cap (no billing source). Owner-reported account totals (separate): $7.27 total spend, $17.73 remaining credits as of before Stage 4.
+**Current task** — Stage 4 closed. FS-009B is PACKAGED_VERIFIED (owner-verified). Verified submission candidate: `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip`. Submission and publication stay with the owner. **Blockers** — none. Spend (owner-reported, separate from stage estimates): $8.29 total spend, $16.71 remaining credits; $1.02 spent since the previous checkpoint (Stage 4), within the $3 cap.
 
 ## Budget and checkpoints
 
@@ -113,7 +113,8 @@ Record test scope, actual result, and any untested requirement. A smoke test ver
 
 **FS-009B · Release candidate.** Package Windows x64, archive it, and test the extracted ZIP outside the editor. Check the intended map, GameMode, spawn, input, HUD, enemy behavior, evolution, exit and ending. Repeat FS-008 from the extracted executable. Check for missing assets or relevant runtime errors. If a fix changes the candidate, rebuild and rerun the affected checks. Verify the final candidate end to end.
 
-**FS-009B result (2026-11-12): IMPLEMENTED, extracted-build startup observed, owner playthrough pending.**
+**FS-009B result (2026-11-12): PACKAGED_VERIFIED (owner-verified).** The owner manually verified the full playthrough and death/restart in the extracted RC1 Windows build. Verified scope: the extracted `Fateshaped.exe` from `Fateshaped_RC1_Win64.zip`, the route, combat, evolution, exit/ending and restart as one manual owner test (not automated). Submission candidate: `C:\GameProjects\Fateshaped\Saved\PackagedBuild\Fateshaped_RC1_Win64.zip` (532 MB, Win64 Development build). Spend: $1.02 since the previous checkpoint; account totals $8.29 spent, $16.71 remaining. Stage 4 is closed.
+- *Earlier status (superseded):* IMPLEMENTED with extracted-build startup observed; details below.
 - *Build:* same UAT method as FS-009A with archive dir `Saved\PackagedBuild\RC`: `RunUAT.bat BuildCookRun -project=...\Fateshaped.uproject -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -archive -archivedirectory=C:\GameProjects\Fateshaped\Saved\PackagedBuild\RC -map=/Game/Maps/L_Route -utf8output -unattended -nosplash`. First attempt failed on "Unable to build while Live Coding is active", the known FS-009A issue. I set the editor's Live Coding `bEnabled` to false, built (BUILD SUCCESSFUL), and restored it to true. Log `Saved/PackagedBuild/uat_rc2.log`.
 - *Source revision:* the working tree at build time, with Stage 3 assets as saved (the owner's latest commit plus uncommitted docs); no source change was made for the build.
 - *ZIP:* `C:\GameProjects\Fateshaped\Saved\PackagedBuild\Fateshaped_RC1_Win64.zip` (532 MB).

@@ -6,16 +6,19 @@
 | --- | --- |
 | Engine version / MCP implementation | UE 5.8 (`EngineAssociation` in `Fateshaped.uproject`; not checked against the running editor) / Unreal MCP via `ModelContextProtocol` + `AllToolsets` plugins, reachable |
 | Startup map | `/Game/Maps/L_Route` (GameDefaultMap and EditorStartupMap); GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
-| Latest candidate build | `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` (532 MB), extracted to `Saved/PackagedBuild/Extracted_RC1/`: startup observed, owner playthrough pending. |
+| Verified submission candidate | `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` (532 MB, Win64 Development), PACKAGED_VERIFIED by the owner for the full playthrough and death/restart in the extracted build |
 | Latest verified build | Skeleton build `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12), PACKAGED_VERIFIED by the owner for spawn, movement, jumping, camera and finish (pre-combat) |
-| Account (separate from stage spend) / stage spend | Total spend $7.27, remaining credits $17.73 (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 within $5 cap (estimate), Stage 3 estimate about $3 to $4 of $6, Stage 4 estimate about $1 of $3 (no billing source) |
-| Known blockers | None. Pending owner manual playthrough for Stage 3 |
+| Account (separate from stage spend) / stage spend | Total spend $8.29, remaining credits $16.71, $1.02 since the previous checkpoint (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 within $5 cap (estimate), Stage 3 estimate about $3 to $4 of $6, Stage 4 $1.02 of $3 (owner-reported) |
+| Known blockers | None |
 
 Refresh a field when its evidence changes. Read `TASKS.md` for the current task, status, and acceptance criteria.
 
 ## Entries
 
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
+
+> **2026-11-12 · Stage 4 / FS-009B · PACKAGED_VERIFIED (owner-verified), Stage 4 closed**  
+> The owner manually verified the full playthrough and death/restart in the extracted RC1 build. `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` is recorded as the verified submission candidate (Win64 Development). Account totals (owner-reported): $8.29 spent, $16.71 remaining, $1.02 spent since the previous checkpoint. Archive and Git index preserved. Publication and jam submission stay with the owner.
 
 > **2026-11-12 · Stage 4 / FS-009B · IMPLEMENTED, extracted-build startup observed (checkpoint)**  
 > Packaged the full game with the FS-009A UAT method (Live Coding disabled for the build and restored). ZIP `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` (532 MB), extracted to `Saved/PackagedBuild/Extracted_RC1/`. The extracted exe launched outside the editor: LoadMap `L_Route`, `BP_ThirdPersonGameMode_C`, alive after 30 s, no Error lines or Blueprint runtime errors (only optional profiler DLL load messages).  
@@ -78,4 +81,4 @@ Add a short entry per checkpoint or blocker, newest first. Capture the test resu
 
 - **Assets and licenses** — Record third-party asset name, source, license, and required credit when used.
 - **AI tools used** — Claude Code, Unreal MCP. Add other tools when used for the project.
-- **Latest tested archive** — Record path, size, tested source revision, and relevant checkpoint once available.
+- **Latest tested archive** — `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip`, 532 MB, built from the working tree on top of the latest commit at build time (uncommitted docs and a tracked build log); owner-verified extracted playthrough and death/restart (Stage 4 checkpoint, 2026-11-12).
