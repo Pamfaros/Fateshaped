@@ -4,11 +4,11 @@
 
 | Field | Last confirmed |
 | --- | --- |
-| Engine version / MCP implementation | Unknown / unknown |
-| Startup map | Unknown |
-| Latest verified build | None recorded |
-| Starting balance / cumulative spend | Pending confirmation |
-| Known blockers | None recorded |
+| Engine version / MCP implementation | UE 5.8 (`EngineAssociation` in `Fateshaped.uproject`; not checked against the running editor) / Unreal MCP via `ModelContextProtocol` + `AllToolsets` plugins, reachable |
+| Startup map | `/Game/Maps/L_Route` (GameDefaultMap and EditorStartupMap); GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
+| Latest verified build | None verified; unverified packaged build at `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12, starts on `L_Route`, owner test pending) |
+| Starting balance / cumulative spend | Pending confirmation / Stage 0 estimate under $1 (no billing source available) |
+| Known blockers | None |
 
 Refresh a field when its evidence changes. Read `TASKS.md` for the current task, status, and acceptance criteria.
 
@@ -16,11 +16,32 @@ Refresh a field when its evidence changes. Read `TASKS.md` for the current task,
 
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
 
-> **Date and time (Europe/Kyiv) · stage / FS-ID · confirmed state**  
-> Change or decision, affected paths, and rationale if needed.  
-> Test, observed result, and any pending verification.  
-> Stage spend / cumulative spend, confirmed or estimated, and source.  
-> Local commit or reason absent, blocker if any, and next action.
+> **2026-11-12 · Stage 1 / FS-009A · IMPLEMENTED (packaged build, owner test pending)**  
+> After the owner installed MSVC and Windows SDK 10.0.26100.0, UAT `BuildCookRun` (Win64 Development, `-build -cook -stage -pak -archive`) passed on the fifth attempt, after two fixes: Live Coding temporarily disabled in editor preferences and restored afterwards, and a `GameFeatureData` Asset Manager entry added to `Config/DefaultGame.ini` to clear a cook error. Output: `Saved/PackagedBuild/Windows/Fateshaped.exe` (about 1 GB).  
+> Launched outside the editor: the log shows LoadMap `/Game/Maps/L_Route` and Game class `BP_ThirdPersonGameMode_C` with 0 errors. Spawn, movement, camera and finish are not yet observed in the packaged build (owner steps in `TASKS.md`).  
+> Spend: Stage 1 estimate is still within the $4 cap, but the repeated builds used more than expected (no billing source).  
+> No commit. The Git index is unchanged (only `Content/Maps/L_Route.umap` staged). New untracked `Build/` (UBT file-open-order logs) is left unstaged for you to decide on. Next: owner runs the packaged exe, then FS-009A can go to PACKAGED_VERIFIED.
+
+> **2026-11-12 · Stage 1 / FS-009A · BLOCKED (packaging toolchain)** (resolved above)  
+> Ran UAT `BuildCookRun` for Win64 Development (`-cook -stage -pak -archive`, map `/Game/Maps/L_Route`, archive dir `Saved/PackagedBuild`). With `-build`, UnrealBuildTool failed: Windows SDK 10.0.19041.0 not found, and no MSVC toolchain under VS 2022. Retry without `-build` failed on the missing `FateshapedEditor.target`. Nothing was packaged or launched. Logs: `Saved/PackagedBuild/uat_attempt1.log` and `uat.log`.  
+> Spend: Stage 1 estimate still within the $4 cap (no billing source).  
+> No commit. The Git index is unchanged (only `Content/Maps/L_Route.umap` staged, as before). Next: owner installs VS 2022 C++ workload and the Windows SDK, then retry FS-009A.
+
+> **2026-11-12 · Stage 1 / FS-002A · PIE_VERIFIED (owner-verified)**  
+> The owner manually tested `L_Route` in PIE. Movement, jumping and camera control work with keyboard and mouse and with a gamepad. They reached the finish platform with the pillar from the spawn point. No separate Blueprint compile check was run. The earlier entry below shows the tool-observed spawn.
+
+> **2026-11-12 · Stage 1 / FS-002A · IMPLEMENTED (PIE spawn only)**  
+> Copied the Third Person template content from `C:\Games\UE_5.8\Templates` into `Content/ThirdPerson`, `Content/Input` and `Content/Characters/Mannequins` (about 98 MB; Pistol, Rifle and Death anims skipped). The copy was a file copy because MCP has no template-import tool. Created `Content/Maps/L_Route.umap` from `Template_Default` with route blocks and a finish pillar and pad at x=2500. Set the startup map and default GameMode in `Config/DefaultEngine.ini` through ConfigSettingsToolset, then saved all assets.  
+> PIE: GameMode, PlayerController and `BP_ThirdPersonCharacter` spawned at PlayerStart (0,0,91.65), grounded; CameraBoom and FollowCamera exist. Movement, camera view and the finish were not observed, because `PressKey` cannot hold a key and the editor capture was covered by the Terminal panel. Dependencies of the character BP resolve. No Blueprint compile or error check was run. Pending owner PIE test (steps in `TASKS.md`).  
+> Spend: Stage 1 so far is an estimate within the $4 cap, with room left for FS-009A (no billing source).  
+> No commit: `Content/Maps/L_Route.umap` is already staged in the index (not by me) and the changes are mixed, so I left everything unstaged. Next: owner PIE test, then FS-009A.
+
+> **2026-11-12 · Stage 0 / FS-001 · VERIFIED (audit)**  
+> Read-only audit; only `TASKS.md` and `DEVLOG.md` edited. Project: `Fateshaped.uproject`, UE 5.8; plugins ModelingToolsEditorMode, ModelContextProtocol, AllToolsets, Terminal. `Source/` is empty (Blueprint-only), `Plugins/` absent. `Content/` has no assets, only stray `Content/.claude/settings*.json`, which are LFS-tracked because of the `Content/**` rule. No third-person template, controller, or reusable assets found. No packaged build or runtime evidence. Latest `Saved/Logs` holds only AutoSDK files.  
+> Git: branch `main`, remote `origin` https://github.com/Pamfaros/Fateshaped.git, git-lfs 3.6.1, `.gitattributes` sends `Content/**` to LFS; `.mcp.json` is ignored. Latest commit `9e72d94`; only my two doc edits are modified.  
+> MCP: `list_toolsets` listed the toolsets. One read, `get_current_level` in `editor_toolset.toolsets.scene.SceneTools`, returned `/Temp/Untitled_1`. Limits: `call_tool` takes the short tool name plus `toolset_name`; the fully prefixed name failed with "Unknown tool". Useful toolsets: Scene, Asset, Blueprint, Object, Actor, ConfigSettings, EditorApp (PIE control), Logs, UMG, DataTable, Automation. No PIE, packaging, or write calls tested.  
+> Stage spend / cumulative: estimate under $1 / under $1 (no billing source).  
+> No commit; edits left unstaged for owner review. Next: FS-002A.
 
 ## Release records
 

@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-001, stage 0, TODO. **Blockers** — none recorded.
+**Current task** — FS-009A, stage 1, IMPLEMENTED (packaged Win64 Development build exists and launches; startup map and GameMode confirmed from its log; owner test pending for spawn, movement, camera and finish, so not yet PACKAGED_VERIFIED). FS-002A is PIE_VERIFIED (owner-verified). FS-001 is VERIFIED. **Blockers** — none. Spend: Stage 0 estimate under $1; Stage 1 so far an estimate (no billing source).
 
 ## Budget and checkpoints
 
@@ -40,9 +40,29 @@ Record test scope, actual result, and any untested requirement. A smoke test ver
 
 **Checkpoint.** Record confirmed project facts, limitations, blockers, and the smallest stage 1 task. Record actual spend and stop.
 
+**FS-001 result (VERIFIED, 2026-11-12).** UE 5.8, Blueprint-only (`Source/` empty), no project assets in `Content/`, startup map is the engine OpenWorld template, no GameMode or pawn set, no build or runtime evidence. Git `main` with `origin` and LFS (`Content/**`) ready. MCP read OK (`get_current_level` returned `/Temp/Untitled_1`). Smallest Stage 1 step: FS-002A, using Unreal MCP to add the Third Person template content, or a minimal map with a Character, GameMode and camera if the template is unavailable. Then save a short route map `/Game/Maps/L_Route` with a placeholder finish and set it as the Game Default Map. Owner approval for Stage 1 is required. Config and Git were not modified.
+
 ## Stage 1 — Playable skeleton and smoke build
 
 - **FS-002A · Controller baseline.** Reuse the third-person template or existing controller. Confirm player spawn, movement and camera. Set up a short route with an obvious placeholder finish.
+  - *Status: PIE_VERIFIED (owner-verified, 2026-11-12).* The owner played `L_Route` in PIE and confirmed that movement, jumping and camera control work with keyboard and mouse and with a gamepad, and that they reached the finish platform and pillar from the spawn point. This is a manual owner test, not an automated one. No separate Blueprint compile check was run.
+  - *Implementation:* Template content copied from `C:\Games\UE_5.8\Templates` into `Content/ThirdPerson` (BP character, game mode, controller, MI), `Content/Input` and `Content/Characters/Mannequins` (Pistol, Rifle and Death anims left out). Map `/Game/Maps/L_Route` was created from `Template_Default`, with route blocks at x=800 and x=1500 and a finish pillar and pad at x=2500. `DefaultEngine.ini` now sets GameDefaultMap, EditorStartupMap and GlobalDefaultGameMode (`BP_ThirdPersonGameMode_C`).
+  - *Observed in PIE:* `BP_ThirdPersonGameMode`, `BP_ThirdPersonPlayerController` and `BP_ThirdPersonCharacter` spawned at the PlayerStart (0,0,91.65), grounded. The character has CameraBoom, FollowCamera and CharMoveComp.
+  - *Not run:* Blueprint compile and error checks.
+  - *Git:* changes are uncommitted. `Content/Maps/L_Route.umap` shows as staged "A" in the index; I did not stage it.
+- **FS-009A status: IMPLEMENTED (2026-11-12), packaged verification pending the owner.**
+  - *Build method (release record):* `C:\Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat BuildCookRun -project=C:\GameProjects\Fateshaped\Fateshaped.uproject -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -archive -archivedirectory=C:\GameProjects\Fateshaped\Saved\PackagedBuild -map=/Game/Maps/L_Route -utf8output -unattended -nosplash`. It took about 3 min and ended with BUILD SUCCESSFUL (attempt 5). Output is about 1 GB.
+  - *Executable:* `C:\GameProjects\Fateshaped\Saved\PackagedBuild\Windows\Fateshaped.exe` (git-ignored via `Saved`).
+  - *Fixes needed since the earlier blocker:* the new Windows SDK 10.0.26100.0 was accepted. The editor's Live Coding stopped the build ("Unable to build while Live Coding is active"), so I set the user-level editor preference Live Coding `bEnabled` to false for the build and restored it to true afterwards. The cook then exited with code 1 although all 575 packages were cooked, because of a "no Asset Manager rule for GameFeatureData" error. I added `[/Script/Engine.AssetManagerSettings]` with a `GameFeatureData` `PrimaryAssetTypesToScan` entry to `Config/DefaultGame.ini` and the cook passed.
+  - *Observed in the packaged exe, launched outside the editor with `-windowed -log` (log `Saved/PackagedBuild/run.log`):* browse and LoadMap `/Game/Maps/L_Route`, "Game class is BP_ThirdPersonGameMode_C", the world came up for play, and the log had 0 "Error:" lines. I stopped the process afterwards.
+  - *Not observed:* spawn, movement, camera and reaching the finish in the packaged build, because the tools can't hold input keys. Owner steps: run the executable above, check that the character appears on the grey floor with a third-person camera, move with WASD, mouse look and space, and walk about 25 m along +X to the tall pillar and pad. Report whether it all works. After that I'll mark FS-009A PACKAGED_VERIFIED.
+  - *Earlier blocker (resolved):* attempts 1 to 4 failed on the missing SDK, then Live Coding, then the GameFeatureData cook error. Logs are `Saved/PackagedBuild/uat_attempt1.log` to `uat_attempt4.log` and `uat.log`.
+  - *Method tried:* `RunUAT.bat BuildCookRun -project=Fateshaped.uproject -platform=Win64 -clientconfig=Development -build -cook -stage -pak -archive -archivedirectory=<project>\Saved\PackagedBuild -map=/Game/Maps/L_Route` (engine at `C:\Games\UE_5.8`).
+  - *Attempt 1 (with `-build`):* failed in UnrealBuildTool with "Platform Win64 is not a valid platform to build. SDK validation failed: Sdk: not found. Required version 10.0.19041.0". `C:\Program Files (x86)\Windows Kits\10` has no `Include` folder, and `Program Files\Microsoft Visual Studio\2022` has no `VC\Tools\MSVC`.
+  - *Attempt 2 (without `-build`):* failed with a missing `Binaries\Win64\FateshapedEditor.target`; UAT needs the project targets built even for a Blueprint-only project.
+  - *Not changed:* no installs and no Git changes. Logs are in `Saved/PackagedBuild/` (git-ignored).
+  - *Owner action:* install "Desktop development with C++" in Visual Studio 2022 with the Windows 10 SDK 10.0.19041 (or newer 10.0.22621, if UE 5.8 accepts it) and the MSVC v143 toolset, then tell me to retry. This is a system dependency, so I did not install it without approval. Alternatively package from the editor: Platforms > Windows > Package Project, output `C:\GameProjects\Fateshaped\Saved\PackagedBuild`; that needs the same toolchain.
+  - *Untested:* packaged startup map, spawn, movement, camera and finish.
 - **FS-009A · Early Windows smoke build.** Confirm Game Default Map, GameMode and player pawn. Package Windows x64 and launch the executable outside the editor. Observe startup map, spawn, movement, camera, and reachable finish. Record the build method and output location for release. Report exact blockers if packaging or launch fails.
 
 **Checkpoint.** A packaged executable can be started and the short route completed. Scope the test to the skeleton.
