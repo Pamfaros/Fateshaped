@@ -2,6 +2,24 @@
 
 A single-player third-person fantasy action RPG and dungeon crawler for Windows. Jam theme: **Director's Cut**. Aim for an 8–12 minute run. A shorter complete adventure is acceptable.
 
+## Design update 2026-11-12 — persistent guild loop (supersedes conflicting text below)
+
+The owner replaced the single-run route with a persistent RPG loop. Where this section and older sections disagree, this section wins.
+
+**Loop.** Launch → Guild Hub (`L_Guild`) → accept quest → portal activates → dungeon (`L_Dungeon_01`) → complete objective → rewards → return to guild → level up → choose essence → repeat. Character progression persists between runs and game restarts. Death ends the run without rewards and returns the player to the guild.
+
+**Guild Hub.** Restores character state; shows level, XP and inventory; hosts the quest board, the quest portal and Gerald, the fairy who looks like a middle-aged man. On first launch he introduces the guild; afterwards `IntroCompleted` is saved and he stays at reception with a short line.
+
+**Quest.** Data: ID, name, description, minimum level, target dungeon, completion condition, XP reward, item reward. First quest: *The Forgotten Crypt* (`Q_ForgottenCrypt`): defeat the crypt's final enemy; reward 120 XP and one Crypt Shard. Rewards are granted exactly once per accepted run (run ID compared with the last rewarded run ID in the save).
+
+**Persistence.** `BP_FS_GameInstance` holds runtime state across level loads and owns the loaded `BP_FS_SaveGame` (slot `FateshapedSave`). Saved: save version, appearance ID, level, XP, ordered essence history, pending essence choices, class ID, inventory, completed quests, intro flag, run counter and last rewarded run. Transient combat state is not saved. A missing save creates defaults in memory; nothing is written until the first real save. Save failures are reported on screen.
+
+**Levels and essences.** Level 1: first essence choice (S, Swordsman). Level 2 (100 XP): grants one *pending* essence choice, saved, and spent in the guild; S then M resolves to Spellsword and unlocks the Arcane Wave. Level 5 is reserved. Order matters; only implemented choices are offered.
+
+**Inventory.** Minimal: one material (Crypt Shard), optionally one equipment item, shown in the guild. No crafting, rarity, stats or trading.
+
+**Carried over.** Combat, V/S/M, the melee enemy, telegraphs, the Arcane Wave and the HUD from the earlier route are reused. The in-dungeon pedestal and altar are temporary until essence selection moves to the guild.
+
 ## Player experience
 
 The player character is the toy. Moving, fighting, and trying a new ability should feel good on their own. The first encounter teaches the Swordsman's basic kit. Evolution then changes how the player fights, and the final encounter gives them room to try the new move. Use magical fantasy, ancient architecture, and light humor to make the descent feel like one small adventure.

@@ -26,3 +26,11 @@ Ordered choices define distinct hybrids. Explore the remaining pairs when their 
 - Expand the guild, portal, quest board, and fairy guide. The crafting area can appear as scenery before it becomes a system.
 - Explore loot, inventory, trading, and crafting from dungeon rewards, including gear, potions and scrolls. Revisit lightweight appearance presets, longer progression, and a persistent campaign.
 - Defer co-op, multiplayer, auctions, a player economy, accounts, and backend services until after the jam.
+
+## Deferred by the 2026-11-12 design update
+
+- Multiplayer and co-op.
+- Full crafting, auction, trading, item rarity, equipment statistics and large loot tables.
+- Advanced class permutations beyond S then M (for example M then S), and the level 5 evolution.
+- Procedural dungeons (Delaunay/MST), an RL-based Dungeon Director and adaptive ML enemies.
+- More quests, dungeons and quest-board selection UI beyond the single Forgotten Crypt contract.

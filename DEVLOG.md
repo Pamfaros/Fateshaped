@@ -5,17 +5,29 @@
 | Field | Last confirmed |
 | --- | --- |
 | Engine version / MCP implementation | UE 5.8 (`EngineAssociation` in `Fateshaped.uproject`; not checked against the running editor) / Unreal MCP via `ModelContextProtocol` + `AllToolsets` plugins, reachable |
-| Startup map | `/Game/Maps/L_Route` (GameDefaultMap and EditorStartupMap); GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
+| Startup map | `/Game/Maps/L_Guild` (GameDefaultMap and EditorStartupMap); GameInstance `BP_FS_GameInstance_C`; GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
 | Verified submission candidate | `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` (532 MB, Win64 Development), PACKAGED_VERIFIED by the owner for the full playthrough and death/restart in the extracted build |
 | Latest verified build | Skeleton build `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12), PACKAGED_VERIFIED by the owner for spawn, movement, jumping, camera and finish (pre-combat) |
 | Account (separate from stage spend) / stage spend | Total spend $8.29, remaining credits $16.71, $1.02 since the previous checkpoint (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 within $5 cap (estimate), Stage 3 estimate about $3 to $4 of $6, Stage 4 $1.02 of $3 (owner-reported) |
-| Known blockers | None |
+| Latest candidate build | `Saved/PackagedBuild/Fateshaped_RC2_Win64.zip` (501 MB), extracted startup observed, owner playthrough pending |
+| Known blockers | Sound import needs an owner step (see `TASKS.md`) |
 
 Refresh a field when its evidence changes. Read `TASKS.md` for the current task, status, and acceptance criteria.
 
 ## Entries
 
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
+
+> **2026-11-12 · Redesign / FS-101 · PIE_TESTED via tools (budget checkpoint)**
+> The owner replaced the design with a persistent guild loop; `GAME_DESIGN.md`, `CLAUDE.md`, `TASKS.md` and `POST_JAM_BACKLOG.md` updated. Added `BP_FS_SaveGame`, `BP_FS_GameInstance`, `L_Guild` and `L_Dungeon_01` (copies of `L_Route`), and set the GameInstance class and default map.
+> PIE: intro once, quest accepted, portal to the dungeon, completion granted 120 XP, level 2, one pending essence choice and a Crypt Shard exactly once (repeated completion calls did nothing), return to the guild, and the same values after a PIE restart with the intro skipped.
+> Not tested: real input, packaged build. Essence selection is still inside the dungeon (FS-102). Spend unknown; stopped for the owner's budget check. No commit; the index is untouched.
+
+> **2026-11-12 · Polish / FS-011, FS-010, RC2 · IMPLEMENTED + COMPILED, PIE logic observed, RC2 startup observed (checkpoint)**
+> The owner approved a $9 polish cap. Added attack, dash and enemy wind-up animations via `DefaultSlot`, a telegraph circle that matches the hit check, hit sparks, ragdoll deaths, an Arcane Wave slab that matches its hit box, a practice dummy with a Mana refund, the class-change banner, HUD prompts, world labels, victory and death screens with R/Esc, and the FS-010 board and Gerald line. Removed player-facing debug draws. Fixed placed enemies that were missing their anim class.
+> PIE (test flags and teleports): S choice, guardian telegraph and strike, death and full reset, evolution, practice refund, one wave hitting both lined-up enemies, Mana exhausted then a melee victory. No runtime errors after the fix.
+> RC2: `Saved/PackagedBuild/Fateshaped_RC2_Win64.zip` (501 MB); the extracted exe starts on `L_Route` with no errors. Not verified: real input, visuals, timing, the R/Esc actions and RC2 gameplay. Sounds are not imported (editor auto-import did not fire; no MCP import tool); the hooks are in place.
+> Spend: estimate about $5 to $7 of $9 (no billing source). No commit; the index is untouched. Next: owner imports the WAVs (optional) and plays RC2.
 
 > **2026-11-12 · Stage 4 / FS-009B · PACKAGED_VERIFIED (owner-verified), Stage 4 closed**  
 > The owner manually verified the full playthrough and death/restart in the extracted RC1 build. `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` is recorded as the verified submission candidate (Win64 Development). Account totals (owner-reported): $8.29 spent, $16.71 remaining, $1.02 spent since the previous checkpoint. Archive and Git index preserved. Publication and jam submission stay with the owner.
@@ -80,5 +92,5 @@ Add a short entry per checkpoint or blocker, newest first. Capture the test resu
 ## Release records
 
 - **Assets and licenses** — Record third-party asset name, source, license, and required credit when used.
-- **AI tools used** — Claude Code, Unreal MCP. Add other tools when used for the project.
+- **AI tools used** — Claude Code, Unreal MCP. Sound effects in `Saved/SFXSource/` were synthesized procedurally by a Claude-written script (no third-party audio). Add other tools when used for the project.
 - **Latest tested archive** — `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip`, 532 MB, built from the working tree on top of the latest commit at build time (uncommitted docs and a tracked build log); owner-verified extracted playthrough and death/restart (Stage 4 checkpoint, 2026-11-12).

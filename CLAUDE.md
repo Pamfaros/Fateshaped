@@ -1,10 +1,10 @@
 # Fateshaped — Claude Code instructions
 
-Build a complete, playable Windows x64 vertical slice for the 2026 Epic AI MegaJam. A task must advance playable progression, combat, the S → M evolution, essential feedback, or release reliability. Protect the submission deadline in `TASKS.md`.
+Build a complete, playable Windows x64 vertical slice for the 2026 Epic AI MegaJam: a persistent guild loop (Guild → quest → portal → dungeon → rewards → guild → level up → essence choice), as defined in the design update at the top of `GAME_DESIGN.md`. A task must advance that loop, persistence, combat, the S → M evolution, essential feedback, or release reliability. Protect the submission deadline in `TASKS.md`.
 
 ## Context and budget
 
-- Use the configured Sonnet 5.5 session at medium effort when available. Work on one task at a time with one agent. Escalate effort only for a specific blocker with budget headroom. Keep output compact and use deterministic local commands for routine checks.
+- Use the owner-selected model (Fable 5.2 since 2026-11-12). Work on one task at a time with one agent. Escalate effort only for a specific blocker with budget headroom. Keep output compact and use deterministic local commands for routine checks.
 - Start with the current FS task and budget in `TASKS.md`. Use heading search and line ranges for the current task or stage, relevant sections of `GAME_DESIGN.md`, and the latest `DEVLOG.md` entry when resuming. Read `Implementation notes` when choosing architecture and `Submission checklist` during release. Keep supporting files out of automatic imports. Reuse facts already confirmed in this session.
 - Work within the stage and cumulative caps. Stop at the stage checkpoint, before a batch likely to exceed its cap, or when usage cannot be reconciled at the checkpoint. Owner approval is required to proceed to the next stage, reallocate caps, or use the reserve. Treat usage estimates as estimates.
 - Keep the playable baseline before optional polish. Keep procedural generation, RL/ML, co-op, economy, and additional hybrids in `POST_JAM_BACKLOG.md`.
