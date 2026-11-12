@@ -6,8 +6,9 @@
 | --- | --- |
 | Engine version / MCP implementation | UE 5.8 (`EngineAssociation` in `Fateshaped.uproject`; not checked against the running editor) / Unreal MCP via `ModelContextProtocol` + `AllToolsets` plugins, reachable |
 | Startup map | `/Game/Maps/L_Route` (GameDefaultMap and EditorStartupMap); GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
+| Latest candidate build | `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` (532 MB), extracted to `Saved/PackagedBuild/Extracted_RC1/`: startup observed, owner playthrough pending. |
 | Latest verified build | Skeleton build `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12), PACKAGED_VERIFIED by the owner for spawn, movement, jumping, camera and finish (pre-combat) |
-| Account (separate from stage spend) / stage spend | Dashboard credits $22.79, organization month-to-date spend $2.22 (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 within $5 cap (estimate), Stage 3 estimate about $3 to $4 of $6 (no billing source) |
+| Account (separate from stage spend) / stage spend | Total spend $7.27, remaining credits $17.73 (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 within $5 cap (estimate), Stage 3 estimate about $3 to $4 of $6, Stage 4 estimate about $1 of $3 (no billing source) |
 | Known blockers | None. Pending owner manual playthrough for Stage 3 |
 
 Refresh a field when its evidence changes. Read `TASKS.md` for the current task, status, and acceptance criteria.
@@ -15,6 +16,13 @@ Refresh a field when its evidence changes. Read `TASKS.md` for the current task,
 ## Entries
 
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
+
+> **2026-11-12 · Stage 4 / FS-009B · IMPLEMENTED, extracted-build startup observed (checkpoint)**  
+> Packaged the full game with the FS-009A UAT method (Live Coding disabled for the build and restored). ZIP `Saved/PackagedBuild/Fateshaped_RC1_Win64.zip` (532 MB), extracted to `Saved/PackagedBuild/Extracted_RC1/`. The extracted exe launched outside the editor: LoadMap `L_Route`, `BP_ThirdPersonGameMode_C`, alive after 30 s, no Error lines or Blueprint runtime errors (only optional profiler DLL load messages).  
+> Not verified: the playthrough, input, HUD, ending and death/restart in the extracted build. Owner steps are in `TASKS.md`. Spend: Stage 4 estimate about $1 of $3 (no billing source). No commit; index untouched.
+
+> **2026-11-12 · Stage 3 · PIE_VERIFIED (owner-verified)**  
+> The owner manually verified the full Stage 3 route and death/restart in PIE: FS-004, FS-006, FS-007 and FS-008 are PIE_VERIFIED. Account totals (owner-reported, separate from the Stage 3 estimate): $7.27 total spend, $17.73 remaining credits. Stage 4 approved with a $3 cap, FS-009B only.
 
 > **2026-11-12 · Stage 3 / FS-004, FS-006, FS-007, FS-008 · IMPLEMENTED + COMPILED, route observed in PIE (checkpoint)**  
 > Connected the route in `L_Route`: S pedestal, guardian, M altar, two-enemy final fight, exit gate, ending. Logic lives in `BP_PlayerCombat` (E interact, Q magic strike, tick world update) with tagged level actors; the HUD gained Class and Essence lines. Blueprints compiled; no runtime errors in the log.  

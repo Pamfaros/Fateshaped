@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — Stage 3 at checkpoint (stop; Stage 4 needs owner approval). FS-004, FS-006, FS-007, FS-008 are IMPLEMENTED + COMPILED, with the full route and death/restart observed in PIE through test flags; owner manual playthrough pending (real keys, HUD text, readability). Stage 2 PIE_VERIFIED (owner). **Blockers** — none. Spend: Stage 3 estimate about $3 to $4 of the $6 cap (no billing source; owner to reconcile). Account figures kept separate (last reported $22.79 credits, $2.22 organization month-to-date before Stage 2).
+**Current task** — Stage 4 at checkpoint (stop; no further work without owner direction). FS-009B: release candidate RC1 built, zipped and extracted; startup of the extracted executable observed; the full playthrough and death/restart are pending the owner, so FS-009B is IMPLEMENTED, not PACKAGED_VERIFIED. **Blockers** — none. Spend: Stage 4 estimate about $1 of the $3 cap (no billing source). Owner-reported account totals (separate): $7.27 total spend, $17.73 remaining credits as of before Stage 4.
 
 ## Budget and checkpoints
 
@@ -105,11 +105,23 @@ Record test scope, actual result, and any untested requirement. A smoke test ver
 - *Not observed:* real E, Q, LMB, Shift and R key input, walking the route by hand, HUD and world-text readability, the exit gate's physical block (the pawn was teleported), packaged-build behavior, gamepad bindings (none exist for E/Q).
 - *Owner manual check (PIE, `L_Route`):* walk to the pedestal and press E (class becomes Swordsman); fight the guardian ahead with LMB and Shift; at the altar press E (Spellsword, M 60); walk to the gate side and fight the two enemies, using Q (arcane strike, M falls by 30 each) and LMB; confirm the gate vanishes, walk to the pad and see "Victory". Die once and press R to confirm the reset. Report any input or readability problem.
 
+**Stage 3 owner verification (PIE_VERIFIED, 2026-11-12).** The owner manually played the full Stage 3 route in PIE with real input, plus death/restart. FS-004, FS-006, FS-007 and FS-008 are PIE_VERIFIED for that scope (manual owner test). Account totals reported by the owner, separate from the Stage 3 estimate: $7.27 total spend, $17.73 remaining credits.
+
 **Checkpoint.** Record an uninterrupted successful PIE playthrough and restart result. Package the integrated build next.
 
 ## Stage 4 — Package and submit
 
 **FS-009B · Release candidate.** Package Windows x64, archive it, and test the extracted ZIP outside the editor. Check the intended map, GameMode, spawn, input, HUD, enemy behavior, evolution, exit and ending. Repeat FS-008 from the extracted executable. Check for missing assets or relevant runtime errors. If a fix changes the candidate, rebuild and rerun the affected checks. Verify the final candidate end to end.
+
+**FS-009B result (2026-11-12): IMPLEMENTED, extracted-build startup observed, owner playthrough pending.**
+- *Build:* same UAT method as FS-009A with archive dir `Saved\PackagedBuild\RC`: `RunUAT.bat BuildCookRun -project=...\Fateshaped.uproject -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -archive -archivedirectory=C:\GameProjects\Fateshaped\Saved\PackagedBuild\RC -map=/Game/Maps/L_Route -utf8output -unattended -nosplash`. First attempt failed on "Unable to build while Live Coding is active", the known FS-009A issue. I set the editor's Live Coding `bEnabled` to false, built (BUILD SUCCESSFUL), and restored it to true. Log `Saved/PackagedBuild/uat_rc2.log`.
+- *Source revision:* the working tree at build time, with Stage 3 assets as saved (the owner's latest commit plus uncommitted docs); no source change was made for the build.
+- *ZIP:* `C:\GameProjects\Fateshaped\Saved\PackagedBuild\Fateshaped_RC1_Win64.zip` (532 MB).
+- *Extracted copy:* `C:\GameProjects\Fateshaped\Saved\PackagedBuild\Extracted_RC1\` and executable `C:\GameProjects\Fateshaped\Saved\PackagedBuild\Extracted_RC1\Fateshaped.exe`.
+- *Observed (launched the extracted exe outside the editor, `-windowed -log`, run log `Saved/PackagedBuild/rc1_run.log`):* LoadMap `/Game/Maps/L_Route`, Game class `BP_ThirdPersonGameMode_C`, world up for play, process still alive after 30 s and then stopped by me. No `Error:` or Blueprint runtime error lines; only benign `Failed to load` messages for optional profiler DLLs (aqProf, Vtune, WinPixGpuCapturer).
+- *Not observed (pending the owner):* spawn view, HUD, E/Q/LMB/Shift/R input, the full route, magic strike, the exit and ending, and death/restart in the extracted build. Debug-draw feedback (telegraph, hit and strike spheres and text) is expected in a Development build but not in Shipping; this candidate is Development.
+- *Owner manual playthrough (run `Extracted_RC1\Fateshaped.exe`):* 1) Check the HUD (V, S, M bars, Class, Essence). 2) Walk +X to the pedestal and press E: class becomes Swordsman. 3) Walk to the guardian (about 10 m past the first block) and fight with LMB, dodging with Left Shift during the red sphere. 4) Walk to the altar and press E: Spellsword, M 60, essence `S, M`. 5) Walk to the two enemies near the gate and use Q (arcane strike, 30 M each) and LMB. 6) Once the gate vanishes, walk to the pad at the end and look for "Victory!". 7) Separately: let an enemy kill you, press R, and confirm V 100, no class, empty essence and enemies back. Close the window with Alt+F4. Report any failure and I will fix and rebuild.
+- *Git:* nothing committed; `Saved` is ignored, so the ZIP and extracted folder are not tracked. The index was not touched.
 
 **Checkpoint.** Record the exact tested build/archive path, size, source revision, and observed tests. Target a ZIP under 1 GB when practical. If larger, check the submission limit and allowed upload method.
 
