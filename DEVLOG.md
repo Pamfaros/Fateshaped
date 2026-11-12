@@ -6,15 +6,29 @@
 | --- | --- |
 | Engine version / MCP implementation | UE 5.8 (`EngineAssociation` in `Fateshaped.uproject`; not checked against the running editor) / Unreal MCP via `ModelContextProtocol` + `AllToolsets` plugins, reachable |
 | Startup map | `/Game/Maps/L_Route` (GameDefaultMap and EditorStartupMap); GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
-| Latest verified build | None verified; unverified packaged build at `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12, starts on `L_Route`, owner test pending) |
-| Starting balance / cumulative spend | Pending confirmation / Stage 0 estimate under $1 (no billing source available) |
-| Known blockers | None |
+| Latest verified build | Skeleton build `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12), PACKAGED_VERIFIED by the owner for spawn, movement, jumping, camera and finish (pre-combat) |
+| Account (separate from stage spend) / stage spend | Dashboard credits $22.79, organization month-to-date spend $2.22 (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 estimate about $3 to $4 of $5 (no billing source) |
+| Known blockers | None. Pending owner checks for Stage 2 input and HUD |
 
 Refresh a field when its evidence changes. Read `TASKS.md` for the current task, status, and acceptance criteria.
 
 ## Entries
 
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
+
+> **2026-11-12 · Stage 2 / FS-003 · HUD fix, owner confirmation pending**  
+> No HUD in PIE. No map GameMode override; the live GameMode had `HUDClass = Engine.HUD` and the active HUD actor was base `HUD_0`, so `BP_CombatHUD` was never spawned (the earlier setting had not persisted). Re-set `HUDClass` on `BP_ThirdPersonGameMode`, compiled and saved. PIE now spawns `BP_CombatHUD_C_0`; no runtime errors in the log.  
+> Not observed: the bars themselves (the viewport capture shows the editor camera, not PIE). Owner to confirm V/S/M visibility. Only the GameMode asset changed; spend is small and within the Stage 2 cap (estimate). No commit; index not touched.
+
+> **2026-11-12 · Stage 2 / FS-002B, FS-003, FS-005 · IMPLEMENTED + COMPILED, logic observed in PIE (checkpoint)**  
+> Added `Content/Combat/` `BP_PlayerCombat`, `BP_MeleeEnemy`, `BP_CombatHUD`; GameMode now uses the new pawn and HUD; one enemy placed in `L_Route`. Blueprints compiled with no errors and the PIE log has no runtime errors. Fixed a bug found in PIE where health was recomputed after being set, so death triggered at 20 V.  
+> PIE (read from live objects): the enemy chased, telegraphed and hit the player; auto-attack defeated the enemy; auto-dodge drained S, was refused with feedback and S recovered; death showed the message and the restart reloaded to V 100 and the enemy at 60 HP.  
+> Not observed: real keyboard/mouse input (tools can't reach the PIE viewport; test flags drive the same events), HUD look, readability of the debug-draw feedback. Mana is a 0/100 pool only; the magic attack stays in Stage 3. Owner steps are in `TASKS.md`.  
+> Spend: Stage 2 estimate about $3 to $4 of the $5 cap (no billing source); account figures stay separate.  
+> No commit. Index: `Content/Combat/BP_CombatHUD`, `BP_MeleeEnemy` and `BP_PlayerCombat` appeared as staged (editor source-control add, not by me); the last two also have unstaged edits, so I left them. Next: owner checks, then approval for Stage 3.
+
+> **2026-11-12 · Stage 1 / FS-009A · PACKAGED_VERIFIED (owner-verified)**  
+> The owner manually ran the packaged Windows build: spawn, movement, jumping and camera work, and the finish platform is reachable. Stage 1 is within budget. Account figures, recorded separately from stage spend: $22.79 credits, $2.22 organization month-to-date spend. Stage 2 approved with a $5 cap.
 
 > **2026-11-12 · Stage 1 / FS-009A · IMPLEMENTED (packaged build, owner test pending)**  
 > After the owner installed MSVC and Windows SDK 10.0.26100.0, UAT `BuildCookRun` (Win64 Development, `-build -cook -stage -pak -archive`) passed on the fifth attempt, after two fixes: Live Coding temporarily disabled in editor preferences and restored afterwards, and a `GameFeatureData` Asset Manager entry added to `Config/DefaultGame.ini` to clear a cook error. Output: `Saved/PackagedBuild/Windows/Fateshaped.exe` (about 1 GB).  
