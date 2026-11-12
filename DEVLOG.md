@@ -7,14 +7,23 @@
 | Engine version / MCP implementation | UE 5.8 (`EngineAssociation` in `Fateshaped.uproject`; not checked against the running editor) / Unreal MCP via `ModelContextProtocol` + `AllToolsets` plugins, reachable |
 | Startup map | `/Game/Maps/L_Route` (GameDefaultMap and EditorStartupMap); GlobalDefaultGameMode `BP_ThirdPersonGameMode_C` |
 | Latest verified build | Skeleton build `Saved/PackagedBuild/Windows/Fateshaped.exe` (2026-11-12), PACKAGED_VERIFIED by the owner for spawn, movement, jumping, camera and finish (pre-combat) |
-| Account (separate from stage spend) / stage spend | Dashboard credits $22.79, organization month-to-date spend $2.22 (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 estimate about $3 to $4 of $5 (no billing source) |
-| Known blockers | None. Pending owner checks for Stage 2 input and HUD |
+| Account (separate from stage spend) / stage spend | Dashboard credits $22.79, organization month-to-date spend $2.22 (owner-reported 2026-11-12) / Stage 0 under $1, Stage 1 within $4 cap (owner-confirmed), Stage 2 within $5 cap (estimate), Stage 3 estimate about $3 to $4 of $6 (no billing source) |
+| Known blockers | None. Pending owner manual playthrough for Stage 3 |
 
 Refresh a field when its evidence changes. Read `TASKS.md` for the current task, status, and acceptance criteria.
 
 ## Entries
 
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
+
+> **2026-11-12 · Stage 3 / FS-004, FS-006, FS-007, FS-008 · IMPLEMENTED + COMPILED, route observed in PIE (checkpoint)**  
+> Connected the route in `L_Route`: S pedestal, guardian, M altar, two-enemy final fight, exit gate, ending. Logic lives in `BP_PlayerCombat` (E interact, Q magic strike, tick world update) with tagged level actors; the HUD gained Class and Essence lines. Blueprints compiled; no runtime errors in the log.  
+> PIE (live pawn state, driven by instance test flags and pawn teleports): S choice, locked and ready altar messages, evolution to `S, M` with M 60, one-use altar, magic strike spending M 60 to 0 with "Not enough mana!" and killing the final enemies, exit opening and gate hiding, victory only after the exit opened, and death/restart resetting essence, V and enemies.  
+> Not observed: real key input, hand-walked route, readability of HUD and debug text, the gate's physical block. Gamepad has no E/Q binding. Owner steps are in `TASKS.md`.  
+> Spend: Stage 3 estimate about $3 to $4 of the $6 cap (no billing source); account figures separate. No commit; index and Git config untouched. Next: owner playthrough, then approval for Stage 4.
+
+> **2026-11-12 · Stage 2 · PIE_VERIFIED (owner-verified)**  
+> The owner manually verified in PIE on `L_Route`: HUD after the fix, attack, dodge, stamina recovery, and death/restart. Stage 3 approved with a $6 cap. Magic attack and M spending are the first Stage 3 work.
 
 > **2026-11-12 · Stage 2 / FS-003 · HUD fix, owner confirmation pending**  
 > No HUD in PIE. No map GameMode override; the live GameMode had `HUDClass = Engine.HUD` and the active HUD actor was base `HUD_0`, so `BP_CombatHUD` was never spawned (the earlier setting had not persisted). Re-set `HUDClass` on `BP_ThirdPersonGameMode`, compiled and saved. PIE now spawns `BP_CombatHUD_C_0`; no runtime errors in the log.  
