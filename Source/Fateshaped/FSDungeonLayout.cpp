@@ -1,5 +1,6 @@
 #include "FSDungeonLayout.h"
 #include "FSDungeonPlan.h"
+#include "FSRewardLibrary.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
@@ -14,6 +15,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -27,6 +29,9 @@ const FName LayoutAttemptedTag(TEXT("FS_DungeonLayoutAttempted"));
 const FName GateTag(TEXT("ExitGate"));
 const FName FirstEncounterTag(TEXT("Enc1"));
 const FName FinalEncounterTag(TEXT("Enc2"));
+const FName DeathHandledTag(TEXT("FS_DeathHandled"));
+constexpr double ChestReach = 230.0;
+constexpr int32 KillExperience = 20;
 
 FVector TileCenter(const FIntPoint& Tile, double Height = 0.0)
 {
@@ -39,11 +44,11 @@ void AddBox(TArray<FTransform>& Boxes, const FVector& Center, const FVector& Dim
     Boxes.Emplace(FRotator::ZeroRotator, Center, Dimensions / 100.0);
 }
 
-void AddProp(AActor& Owner, UStaticMesh* Mesh, const FVector& Base, double Yaw)
+UStaticMeshComponent* AddProp(AActor& Owner, UStaticMesh* Mesh, const FVector& Base, double Yaw)
 {
     if (!Mesh)
     {
-        return;
+        return nullptr;
     }
     UStaticMeshComponent* Prop = NewObject<UStaticMeshComponent>(&Owner);
     Prop->SetupAttachment(Owner.GetRootComponent());
@@ -54,6 +59,7 @@ void AddProp(AActor& Owner, UStaticMesh* Mesh, const FVector& Base, double Yaw)
     Prop->SetRelativeLocation(Base - FVector(0, 0, Bounds.Origin.Z - Bounds.BoxExtent.Z));
     Prop->SetRelativeRotation(FRotator(0, Yaw, 0));
     Prop->RegisterComponent();
+    return Prop;
 }
 
 UPointLightComponent* AddLight(AActor& Owner, const FVector& Location, const FLinearColor& Color, float Intensity, float Radius)
@@ -81,6 +87,20 @@ UTextRenderComponent* AddLabel(AActor& Owner, FName Name, const FVector& Locatio
     Label->RegisterComponent();
     return Label;
 }
+
+bool IsMarked(const AActor& Actor, FName Name)
+{
+    const auto* Property = FindFProperty<FBoolProperty>(Actor.GetClass(), Name);
+    return Property && Property->GetPropertyValue_InContainer(&Actor);
+}
+
+void ShowRewardMessage(AActor& Player, const FString& Text)
+{
+    if (const auto* Message = FindFProperty<FStrProperty>(Player.GetClass(), TEXT("Message")))
+    {
+        Message->SetPropertyValue_InContainer(&Player, Text);
+    }
+}
 }
 
 AFSDungeonLayout::AFSDungeonLayout()
@@ -98,6 +118,7 @@ AFSDungeonLayout::AFSDungeonLayout()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Crate(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Crate.SM_Crate"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Barrel(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Barrel.SM_Barrel"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Chest(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Chest.SM_Chest"));
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> ChestLidAsset(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Lid_Chest.SM_Lid_Chest"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Pipe(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Pipe.SM_Pipe"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cone(TEXT("/Engine/BasicShapes/Cone.Cone"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
@@ -106,6 +127,7 @@ AFSDungeonLayout::AFSDungeonLayout()
     CrateMesh = Crate.Object;
     BarrelMesh = Barrel.Object;
     ChestMesh = Chest.Object;
+    ChestLidMesh = ChestLidAsset.Object;
     PipeMesh = Pipe.Object;
     SpikeMesh = Cone.Object;
     FumeMesh = Sphere.Object;
@@ -164,7 +186,8 @@ bool AFSDungeonLayout::HasReachedExit(const AActor* Player)
     if (TActorIterator<AFSDungeonLayout> Layout(Player->GetWorld()); Layout)
     {
         const FVector Offset = Position - Layout->ExitCenter;
-        return FMath::Abs(Offset.X) <= 155.0 && FMath::Abs(Offset.Y) <= 155.0 && FMath::Abs(Offset.Z) <= 180.0;
+        return Layout->PendingKillExperience == 0 && FMath::Abs(Offset.X) <= 155.0
+            && FMath::Abs(Offset.Y) <= 155.0 && FMath::Abs(Offset.Z) <= 180.0;
     }
 
     return Position.X > 2400.0;
@@ -270,7 +293,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
             }
             break;
         case ERoomRole::Cache:
-            AddProp(*this, ChestMesh, Center + FVector(40, 0, 0), 180);
+            AddChest(Center);
             AddProp(*this, CrateMesh, Corner + FVector(60, -10, 0), 20);
             AddLight(*this, Center + FVector(0, 0, 160), FLinearColor(1.0f, 0.72f, 0.24f), 14000, 600);
             break;
@@ -294,10 +317,115 @@ bool AFSDungeonLayout::Build(int32 RunId)
         Actor->SetActorHiddenInGame(true);
         Actor->SetActorEnableCollision(false);
     }
+    Guardian->OnTakeAnyDamage.AddDynamic(this, &AFSDungeonLayout::OnEncounterDamage);
+    for (ACharacter* Enemy : FinalEnemies)
+    {
+        Enemy->OnTakeAnyDamage.AddDynamic(this, &AFSDungeonLayout::OnEncounterDamage);
+    }
     SetActorTickEnabled(true);
     UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt run %d: %d rooms, %d tiles, %d L bends, %d T junctions, %d shortcuts, %d traps."),
         RunId, Plan.Rooms.Num(), Plan.Tiles.Num(), Plan.Corners, Plan.Junctions, Plan.Shortcuts, Traps.Num());
     return true;
+}
+
+void AFSDungeonLayout::AddChest(const FVector& Center)
+{
+    ChestCenter = Center;
+    const UStaticMeshComponent* Base = AddProp(*this, ChestMesh, Center, 180);
+    const double Height = Base ? Base->Bounds.GetBox().Max.Z : 45;
+    ChestLid = AddProp(*this, ChestLidMesh, Center + FVector(0, 0, Height), 180);
+    ChestLabel = AddLabel(*this, TEXT("CacheChest"), Center + FVector(0, 0, Height + 80), 180, TEXT("[E] OPEN CHEST"));
+    ChestLabel->SetWorldSize(32);
+    ChestLabel->SetTextRenderColor(FColor(255, 205, 110));
+    ChestLabel->SetVisibility(false);
+}
+
+void AFSDungeonLayout::InteractWithChest(AActor* Player)
+{
+    if (IsValid(Player) && !IsMarked(*Player, TEXT("bDead")) && !IsMarked(*Player, TEXT("bWon")))
+    {
+        if (TActorIterator<AFSDungeonLayout> Layout(Player->GetWorld()); Layout)
+        {
+            Layout->TryOpenChest(*Player);
+        }
+    }
+}
+
+void AFSDungeonLayout::TryOpenChest(AActor& Player)
+{
+    if (!ChestLabel || bChestOpened || FVector::DistSquared(Player.GetActorLocation(), ChestCenter) > FMath::Square(ChestReach))
+    {
+        return;
+    }
+
+    const FFSReward Reward{0, TEXT("Arcane Crystal")};
+    if (!UFSRewardLibrary::TryGrantExpeditionReward(&Player, Reward))
+    {
+        ShowRewardMessage(Player, TEXT("Chest reward could not be saved. Press E to retry."));
+        return;
+    }
+
+    bChestOpened = true;
+    ChestLabel->SetText(FText::FromString(TEXT("EMPTY CHEST")));
+    if (ChestLid)
+    {
+        ChestLid->AddRelativeLocation(FVector(0, -15, 16));
+        ChestLid->SetRelativeRotation(FRotator(62, 180, 0));
+    }
+    ShowRewardMessage(Player, TEXT("Chest opened: Arcane Crystal"));
+}
+
+void AFSDungeonLayout::UpdateChest(const AActor& Player)
+{
+    if (!ChestLabel)
+    {
+        return;
+    }
+    const FVector Offset = Player.GetActorLocation() - ChestCenter;
+    const bool bNearby = Offset.SizeSquared() <= FMath::Square(ChestReach);
+    ChestLabel->SetVisibility(bNearby);
+    if (bNearby)
+    {
+        ChestLabel->SetRelativeRotation(FRotator(0, Offset.Rotation().Yaw, 0));
+    }
+}
+
+void AFSDungeonLayout::OnEncounterDamage(AActor* Enemy, float Damage, const UDamageType* DamageType,
+    AController* EventInstigator, AActor* DamageCauser)
+{
+    // Unreal calls the Blueprint damage event before broadcasting this delegate.
+    if (!IsValid(Enemy) || Enemy->ActorHasTag(DeathHandledTag) || !IsMarked(*Enemy, TEXT("bDead")))
+    {
+        return;
+    }
+    Enemy->Tags.Add(DeathHandledTag);
+
+    AActor* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+    if (!IsValid(Player) || (DamageCauser != Player && (!EventInstigator || EventInstigator->GetPawn() != Player)))
+    {
+        return;
+    }
+    PendingKillExperience += KillExperience;
+    TryGrantKillExperience(*Player);
+}
+
+void AFSDungeonLayout::TryGrantKillExperience(AActor& Player)
+{
+    if (PendingKillExperience == 0 || GetWorld()->GetTimeSeconds() < NextRewardRetry)
+    {
+        return;
+    }
+    const FFSReward Reward{PendingKillExperience, FString()};
+    if (UFSRewardLibrary::TryGrantExpeditionReward(&Player, Reward))
+    {
+        ShowRewardMessage(Player, FString::Printf(TEXT("Enemy defeated: +%d XP"), PendingKillExperience));
+        PendingKillExperience = 0;
+    }
+    else
+    {
+        NextRewardRetry = GetWorld()->GetTimeSeconds() + 0.5;
+        ShowRewardMessage(Player, TEXT("Enemy XP pending: could not save. Retrying."));
+    }
 }
 
 void AFSDungeonLayout::AddTrap(const FVector& Center, bool bSpikes, bool bAlongX)
@@ -390,6 +518,9 @@ void AFSDungeonLayout::Tick(float DeltaSeconds)
     {
         return;
     }
+
+    UpdateChest(*Player);
+    TryGrantKillExperience(*Player);
 
     const double Time = GetWorld()->GetTimeSeconds();
     const FVector Position = Player->GetActorLocation();
