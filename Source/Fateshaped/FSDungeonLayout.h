@@ -29,6 +29,9 @@ public:
     UFUNCTION(BlueprintCallable, Category="Fateshaped|Dungeon")
     static void InteractWithChest(AActor* Player);
 
+    UFUNCTION(BlueprintPure, Category="Fateshaped|Dungeon")
+    static bool HasLivingCryptEnemies(const AActor* Player);
+
 private:
     virtual void Tick(float DeltaSeconds) override;
     bool Build(int32 RunId);

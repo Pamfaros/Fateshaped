@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-111 sets Spellsword's maximum Mana to 60 and standardizes resource label precision. Extracted RC8 starts in the Guild. **Next P0:** confirm kill XP, chest interaction, quest rewards and profile reload in a full RC8 playthrough. See DEVLOG for the exact verification scope.
+**Current task** — FS-112 adds role-based enemy behavior, a finite enemy bag and the Crypt Warden boss. Extracted Windows RC9 starts in the Guild. **Next P0:** play a full expedition in RC9 with normal controls, including Warden telegraphs, XP, rewards and profile reload. See DEVLOG for the exact verification scope.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -59,6 +59,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-109 · Delaunay dungeon and trap rooms — owner playtested.** Each contract generates nine rooms, L bends, T junctions and a loop. The planner test passed on 256 seeds. The existing guardian and final pair gate the exit. Two scripted Guild-to-dungeon runs verified varying layouts, spike and poison damage, trap avoidance, the exit gate, rewards and return to the Guild. The owner reported expected behavior in manual play.
 - **FS-110 · Kill XP and chest rewards — COMPILED + PIE_TESTED.** Player kills give 20 XP each during the generated expedition. E opens the cache chest in range and grants one Arcane Crystal per run. The quest still gives 120 XP and a Crypt Shard. The Blueprint-callable reward function supports future item pickups. The scripted test verified repeat protection, retry after a failed save, completion and the resulting 180 XP and two items.
 - **FS-111 · Mana cap and resource labels — COMPILED + PIE_TESTED.** Mana starts at zero before evolution, fills to 60 on unlocking Spellsword and stays capped at 60 after regeneration. The combat HUD formats V/S/M to one decimal place. The imported VitalSystems components remain available as a reference for a later migration.
+- **FS-112 · Crypt enemies and Warden — COMPILED + PIE_TESTED.** A seeded finite bag supplies up to four optional foes alongside the guardian and boss. Combat runs an Unreal Behavior Tree with attack, defensive, positioning and leash branches. The Warden must fall before the exit opens. Scripted PIE verified a normal melee hit, telegraphed boss damage, a frontal block, quest completion and XP. NVIDIA ACE availability and manual tuning are recorded in DEVLOG.
 - **P1 — TODO.** Fairy dialogue polish and manual visual and audio review.
 
 ## Stage 0 — Audit

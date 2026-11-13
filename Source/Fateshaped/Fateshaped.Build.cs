@@ -6,6 +6,6 @@ public class Fateshaped : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine" });
-        PrivateDependencyModuleNames.AddRange(new[] { "GeometryCore", "InputCore", "Slate", "SlateCore" });
+        PrivateDependencyModuleNames.AddRange(new[] { "AIModule", "GameplayTasks", "GeometryCore", "InputCore", "Slate", "SlateCore" });
     }
 }

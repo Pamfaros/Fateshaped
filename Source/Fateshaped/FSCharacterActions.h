@@ -31,6 +31,9 @@ public:
     UFUNCTION(BlueprintPure, Category="Fateshaped|Character")
     static bool CanMeleeHit(const ACharacter* Character, const AActor* Target);
 
+    UFUNCTION(BlueprintCallable, Category="Fateshaped|Character")
+    static void ApplyMeleeStrike(ACharacter* Character, float Damage);
+
     UFUNCTION(BlueprintPure, Category="Fateshaped|Character")
     static bool HasClearStrike(const AActor* Attacker, const AActor* Target);
 

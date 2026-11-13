@@ -1,4 +1,5 @@
 #include "FSCharacterActions.h"
+#include "FSCryptEnemy.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -145,6 +146,21 @@ bool UFSCharacterActions::CanMeleeHit(const ACharacter* Character, const AActor*
         && HasClearStrike(Character, Target);
 }
 
+void UFSCharacterActions::ApplyMeleeStrike(ACharacter* Character, float Damage)
+{
+    if (!IsValid(Character))
+    {
+        return;
+    }
+    for (TActorIterator<AFSCryptEnemy> Enemy(Character->GetWorld()); Enemy; ++Enemy)
+    {
+        if (!Enemy->IsDefeated() && CanMeleeHit(Character, *Enemy))
+        {
+            UGameplayStatics::ApplyDamage(*Enemy, Damage, Character->GetController(), Character, nullptr);
+        }
+    }
+}
+
 bool UFSCharacterActions::CastArcaneWave(ACharacter* Character, TSubclassOf<AActor> EnemyClass,
     TSubclassOf<AActor> WaveEffect, TSubclassOf<AActor> HitEffect, float Damage)
 {
@@ -188,7 +204,8 @@ bool UFSCharacterActions::CastArcaneWave(ACharacter* Character, TSubclassOf<AAct
     for (TActorIterator<AActor> Actor(&World); Actor; ++Actor)
     {
         const bool bPractice = Actor->ActorHasTag(PracticeTag) && !Actor->IsHidden();
-        const bool bEnemy = EnemyClass && Actor->IsA(EnemyClass);
+        const AFSCryptEnemy* CryptEnemy = Cast<AFSCryptEnemy>(*Actor);
+        const bool bEnemy = CryptEnemy ? !CryptEnemy->IsDefeated() : EnemyClass && Actor->IsA(EnemyClass);
         if (!bPractice && !bEnemy)
         {
             continue;

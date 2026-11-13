@@ -1,6 +1,7 @@
 #include "FSDungeonLayout.h"
 #include "FSDungeonPlan.h"
 #include "FSRewardLibrary.h"
+#include "FSCryptEnemy.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
@@ -31,7 +32,6 @@ const FName FirstEncounterTag(TEXT("Enc1"));
 const FName FinalEncounterTag(TEXT("Enc2"));
 const FName DeathHandledTag(TEXT("FS_DeathHandled"));
 constexpr double ChestReach = 230.0;
-constexpr int32 KillExperience = 20;
 
 FVector TileCenter(const FIntPoint& Tile, double Height = 0.0)
 {
@@ -193,12 +193,26 @@ bool AFSDungeonLayout::HasReachedExit(const AActor* Player)
     return Position.X > 2400.0;
 }
 
+bool AFSDungeonLayout::HasLivingCryptEnemies(const AActor* Player)
+{
+    if (IsValid(Player))
+    {
+        for (TActorIterator<AFSCryptEnemy> Enemy(Player->GetWorld()); Enemy; ++Enemy)
+        {
+            if (!Enemy->IsDefeated())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool AFSDungeonLayout::Build(int32 RunId)
 {
     TArray<AActor*> LegacyGeometry;
     AStaticMeshActor* Gate = nullptr;
-    ACharacter* Guardian = nullptr;
-    TArray<ACharacter*> FinalEnemies;
+    TArray<ACharacter*> LegacyEnemies;
     for (TActorIterator<AActor> Actor(GetWorld()); Actor; ++Actor)
     {
         if (Actor->ActorHasTag(LegacyGeometryTag))
@@ -211,26 +225,17 @@ bool AFSDungeonLayout::Build(int32 RunId)
         }
         if (ACharacter* Enemy = Cast<ACharacter>(*Actor))
         {
-            if (Enemy->ActorHasTag(FirstEncounterTag))
+            if (Enemy->ActorHasTag(FirstEncounterTag) || Enemy->ActorHasTag(FinalEncounterTag))
             {
-                Guardian = Enemy;
-            }
-            if (Enemy->ActorHasTag(FinalEncounterTag))
-            {
-                FinalEnemies.Add(Enemy);
+                LegacyEnemies.Add(Enemy);
             }
         }
     }
-    if (!Gate || !Guardian || FinalEnemies.Num() != 2 || LegacyGeometry.IsEmpty()
+    if (!Gate || LegacyGeometry.IsEmpty()
         || !Floor->GetStaticMesh() || !Walls->GetStaticMesh())
     {
         return false;
     }
-    FinalEnemies.Sort([](const ACharacter& A, const ACharacter& B)
-    {
-        return A.GetActorLocation().X < B.GetActorLocation().X;
-    });
-
     FSDungeon::FPlan Plan;
     if (!FSDungeon::Generate(RunId, Plan))
     {
@@ -259,6 +264,67 @@ bool AFSDungeonLayout::Build(int32 RunId)
     Walls->AddInstances(WallBoxes, false);
 
     FRandomStream Random(RunId);
+    TArray<AFSCryptEnemy*> Spawned;
+    const auto SpawnEnemy = [&](const FRoom& Room, EFSCryptRole EnemyRole, FIntPoint Offset, FName Tag = NAME_None)
+    {
+        const FTransform Transform(FRotator::ZeroRotator, TileCenter(Room.Center + Offset, 94));
+        AFSCryptEnemy* Enemy = GetWorld()->SpawnActorDeferred<AFSCryptEnemy>(AFSCryptEnemy::StaticClass(), Transform,
+            this, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+        if (Enemy)
+        {
+            Enemy->SetActorTransform(Transform);
+            Enemy->Configure(EnemyRole, TileCenter(Room.Center), FVector2D((Room.HalfSize.X + 0.5) * TileSize, (Room.HalfSize.Y + 0.5) * TileSize),
+                Random.GetUnsignedInt());
+            if (!Tag.IsNone())
+            {
+                Enemy->Tags.Add(Tag);
+            }
+            Enemy->OnTakeAnyDamage.AddDynamic(this, &AFSDungeonLayout::OnEncounterDamage);
+            Enemy->FinishSpawning(Transform);
+            Spawned.Add(Enemy);
+        }
+        return Enemy != nullptr;
+    };
+    for (const FRoom& Room : Plan.Rooms)
+    {
+        const bool bGuardian = Room.Role == ERoomRole::Guardian;
+        const bool bBoss = Room.Role == ERoomRole::Boss;
+        if ((bGuardian || bBoss) && !SpawnEnemy(Room, bBoss ? EFSCryptRole::Warden : EFSCryptRole::Vanguard,
+            FIntPoint::ZeroValue, bBoss ? FinalEncounterTag : FirstEncounterTag))
+        {
+            for (AFSCryptEnemy* Enemy : Spawned)
+            {
+                Enemy->Destroy();
+            }
+            return false;
+        }
+    }
+    for (ACharacter* Enemy : LegacyEnemies)
+    {
+        Enemy->Destroy();
+    }
+
+    TArray<EFSCryptRole> EnemyBag{EFSCryptRole::Skirmisher, EFSCryptRole::Skirmisher, EFSCryptRole::Skirmisher, EFSCryptRole::Vanguard};
+    constexpr float SpawnChance = 0.60f;
+    for (const FRoom& Room : Plan.Rooms)
+    {
+        if (Room.Role != ERoomRole::Passage)
+        {
+            continue;
+        }
+        const FIntPoint Positions[] = {{-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
+        int32 Slot = 0;
+        while (!EnemyBag.IsEmpty() && Random.FRand() < SpawnChance)
+        {
+            const int32 Pick = Random.RandRange(0, EnemyBag.Num() - 1);
+            if (!SpawnEnemy(Room, EnemyBag[Pick], Positions[Slot++]))
+            {
+                break;
+            }
+            EnemyBag.RemoveAtSwap(Pick, EAllowShrinking::No);
+        }
+    }
+
     for (const FRoom& Room : Plan.Rooms)
     {
         const FVector Center = TileCenter(Room.Center);
@@ -273,15 +339,17 @@ bool AFSDungeonLayout::Build(int32 RunId)
         switch (Room.Role)
         {
         case ERoomRole::Guardian:
-            Guardian->SetActorLocation(Center + FVector(0, 0, 100), false, nullptr, ETeleportType::TeleportPhysics);
             AddProp(*this, BarrelMesh, Corner + FVector(60, -10, 0), 20);
             break;
         case ERoomRole::Boss:
         {
-            const int32 Lane = Random.RandRange(-1, 1);
-            FinalEnemies[0]->SetActorLocation(TileCenter(Room.Center + FIntPoint(0, Lane), 100), false, nullptr, ETeleportType::TeleportPhysics);
-            FinalEnemies[1]->SetActorLocation(TileCenter(Room.Center + FIntPoint(1, Lane), 100), false, nullptr, ETeleportType::TeleportPhysics);
-            AddLight(*this, Center + FVector(0, 0, 270), FLinearColor(0.72f, 0.18f, 0.08f), 23000, 1100);
+            for (const int32 Side : {-1, 1})
+            {
+                const FVector Brazier = TileCenter(Room.Center + FIntPoint(Side * Room.HalfSize.X, -Room.HalfSize.Y));
+                AddProp(*this, TorchMesh, Brazier + FVector(0, -60, 115), 0);
+                AddLight(*this, Brazier + FVector(0, 0, 205), FLinearColor(1.0f, 0.23f, 0.08f), 22000, 920);
+            }
+            AddLight(*this, Center + FVector(0, 0, 305), FLinearColor(0.75f, 0.28f, 0.12f), 19500, 1050);
             break;
         }
         case ERoomRole::Spikes:
@@ -317,14 +385,9 @@ bool AFSDungeonLayout::Build(int32 RunId)
         Actor->SetActorHiddenInGame(true);
         Actor->SetActorEnableCollision(false);
     }
-    Guardian->OnTakeAnyDamage.AddDynamic(this, &AFSDungeonLayout::OnEncounterDamage);
-    for (ACharacter* Enemy : FinalEnemies)
-    {
-        Enemy->OnTakeAnyDamage.AddDynamic(this, &AFSDungeonLayout::OnEncounterDamage);
-    }
     SetActorTickEnabled(true);
-    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt run %d: %d rooms, %d tiles, %d L bends, %d T junctions, %d shortcuts, %d traps."),
-        RunId, Plan.Rooms.Num(), Plan.Tiles.Num(), Plan.Corners, Plan.Junctions, Plan.Shortcuts, Traps.Num());
+    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt run %d: %d rooms, %d tiles, %d L bends, %d T junctions, %d shortcuts, %d traps, %d enemies."),
+        RunId, Plan.Rooms.Num(), Plan.Tiles.Num(), Plan.Corners, Plan.Junctions, Plan.Shortcuts, Traps.Num(), Spawned.Num());
     return true;
 }
 
@@ -394,7 +457,8 @@ void AFSDungeonLayout::OnEncounterDamage(AActor* Enemy, float Damage, const UDam
     AController* EventInstigator, AActor* DamageCauser)
 {
     // Unreal calls the Blueprint damage event before broadcasting this delegate.
-    if (!IsValid(Enemy) || Enemy->ActorHasTag(DeathHandledTag) || !IsMarked(*Enemy, TEXT("bDead")))
+    const AFSCryptEnemy* CryptEnemy = Cast<AFSCryptEnemy>(Enemy);
+    if (!IsValid(CryptEnemy) || Enemy->ActorHasTag(DeathHandledTag) || !CryptEnemy->IsDefeated())
     {
         return;
     }
@@ -405,7 +469,7 @@ void AFSDungeonLayout::OnEncounterDamage(AActor* Enemy, float Damage, const UDam
     {
         return;
     }
-    PendingKillExperience += KillExperience;
+    PendingKillExperience += CryptEnemy->GetExperienceReward();
     TryGrantKillExperience(*Player);
 }
 
