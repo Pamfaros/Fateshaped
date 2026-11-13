@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-110 adds kill XP and chest rewards to Forgotten Crypt. The owner confirmed the prior dungeon milestone in manual play. Extracted RC7 starts in the Guild. **Next P0:** confirm kill XP, chest interaction, quest rewards and profile reload in RC7 with normal controls. See DEVLOG for the exact verification scope.
+**Current task** — FS-111 sets Spellsword's maximum Mana to 60 and standardizes resource label precision. Extracted RC8 starts in the Guild. **Next P0:** confirm kill XP, chest interaction, quest rewards and profile reload in a full RC8 playthrough. See DEVLOG for the exact verification scope.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -58,6 +58,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-108 · Pause and settings — COMPILED + PACKAGED_TESTED.** Esc opens the menu in Guild and Dungeon. Resume and Esc return to the game. The master volume slider and Low/Medium/High/Epic graphics cycle apply immediately. Both settings persist after restart. Exit Game asks for confirmation and closes the executable. Tested from `Saved/PackagedBuild/Fateshaped_RC5_Win64.zip` (583,322,707 bytes) on an isolated profile. Audio output level was not measured.
 - **FS-109 · Delaunay dungeon and trap rooms — owner playtested.** Each contract generates nine rooms, L bends, T junctions and a loop. The planner test passed on 256 seeds. The existing guardian and final pair gate the exit. Two scripted Guild-to-dungeon runs verified varying layouts, spike and poison damage, trap avoidance, the exit gate, rewards and return to the Guild. The owner reported expected behavior in manual play.
 - **FS-110 · Kill XP and chest rewards — COMPILED + PIE_TESTED.** Player kills give 20 XP each during the generated expedition. E opens the cache chest in range and grants one Arcane Crystal per run. The quest still gives 120 XP and a Crypt Shard. The Blueprint-callable reward function supports future item pickups. The scripted test verified repeat protection, retry after a failed save, completion and the resulting 180 XP and two items.
+- **FS-111 · Mana cap and resource labels — COMPILED + PIE_TESTED.** Mana starts at zero before evolution, fills to 60 on unlocking Spellsword and stays capped at 60 after regeneration. The combat HUD formats V/S/M to one decimal place. The imported VitalSystems components remain available as a reference for a later migration.
 - **P1 — TODO.** Fairy dialogue polish and manual visual and audio review.
 
 ## Stage 0 — Audit
