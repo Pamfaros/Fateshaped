@@ -23,7 +23,7 @@ class AFSCryptEnemy : public ACharacter
 
 public:
     AFSCryptEnemy();
-    void Configure(EFSCryptRole InRole, const FVector& RoomCenter, const FVector2D& RoomHalfExtent, int32 Seed);
+    void Configure(EFSCryptRole InRole, const FVector& RoomCenter, const FVector2D& RoomHalfExtent, int32 Seed, int32 RoomSlot = 0);
     bool TryBehavior(EFSCryptBranch Branch);
     int32 GetExperienceReward() const { return CombatRole == EFSCryptRole::Warden ? 60 : 20; }
     bool IsDefeated() const { return bDead; }
@@ -41,11 +41,20 @@ private:
     void Face(const FVector& Point);
     void MoveAlong(const FVector& Direction, float Speed);
     void StartAttack(EAction Attack, const FVector& Target, double Now);
+    UFUNCTION()
+    void OnAttackPoseEvaluated();
+
+    void UpdateAttack(ACharacter* Player, double Now);
+    bool IsWindingUp() const;
     void ShowTelegraph();
     void ResolveHit(ACharacter& Player);
     bool CanSee(const ACharacter& Player) const;
     bool IsInRoom(const FVector& Position, double Padding = 0.0) const;
-    bool AnotherEnemyIsAttacking() const;
+    void GetRoomAllies(TArray<const AFSCryptEnemy*>& Allies) const;
+    FVector GetAttackPosition(const FVector& Target, const TArray<const AFSCryptEnemy*>& Allies) const;
+    FVector SteerAroundAllies(const FVector& Direction, const TArray<const AFSCryptEnemy*>& Allies) const;
+    bool CanCommitAttack(const FVector& Target, const TArray<const AFSCryptEnemy*>& Allies, double ImpactTime) const;
+    float GetWindup(EAction Attack) const;
     void UpdateLabel(ACharacter* Player);
 
     UPROPERTY()
@@ -106,6 +115,10 @@ private:
     EAction Action = EAction::None;
     EAction PreviousAttack = EAction::None;
     double ActionEnd = 0.0;
+    double ExpectedImpact = 0.0;
+    float ImpactPosition = 0.0f;
+    float StrikeTravel = 0.0f;
+    bool bHasImpacted = false;
     double NextAttack = 0.0;
     double NextDefense = 0.0;
     double LastHit = -10.0;
@@ -113,6 +126,7 @@ private:
     double OrbitUntil = 0.0;
     float MaxHealth = 55.0f;
     int32 OrbitSide = 1;
+    int32 SpawnSlot = 0;
     int32 Pressure = 0;
     bool bCombo = false;
     bool bGuardNext = true;

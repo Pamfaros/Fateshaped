@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-112 adds role-based enemy behavior, a finite enemy bag and the Crypt Warden boss. Extracted Windows RC9 starts in the Guild. **Next P0:** play a full expedition in RC9 with normal controls, including Warden telegraphs, XP, rewards and profile reload. See DEVLOG for the exact verification scope.
+**Current task** — FS-113 synchronizes enemy damage with the contact poses and lets mixed groups attack from different angles. Extracted RC10 starts in Guild. **Next P0:** play a full RC10 expedition with normal controls and verify the updated combat and reward persistence. See DEVLOG for the exact verification scope.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -60,6 +60,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-110 · Kill XP and chest rewards — COMPILED + PIE_TESTED.** Player kills give 20 XP each during the generated expedition. E opens the cache chest in range and grants one Arcane Crystal per run. The quest still gives 120 XP and a Crypt Shard. The Blueprint-callable reward function supports future item pickups. The scripted test verified repeat protection, retry after a failed save, completion and the resulting 180 XP and two items.
 - **FS-111 · Mana cap and resource labels — COMPILED + PIE_TESTED.** Mana starts at zero before evolution, fills to 60 on unlocking Spellsword and stays capped at 60 after regeneration. The combat HUD formats V/S/M to one decimal place. The imported VitalSystems components remain available as a reference for a later migration.
 - **FS-112 · Crypt enemies and Warden — COMPILED + PIE_TESTED.** A seeded finite bag supplies up to four optional foes alongside the guardian and boss. Combat runs an Unreal Behavior Tree with attack, defensive, positioning and leash branches. The Warden must fall before the exit opens. Scripted PIE verified a normal melee hit, telegraphed boss damage, a frontal block, quest completion and XP. NVIDIA ACE availability and manual tuning are recorded in DEVLOG.
+- **FS-113 · Enemy hit timing and group positioning — COMPILED + PIE_TESTED.** Damage resolves when the attack clip reaches its contact pose. The Warden advances during the lunge. Vanguard holds the front while Skirmishers seek separate angles. Scripted PIE observed three attackers from different directions in one room and up to two concurrent windups.
 - **P1 — TODO.** Fairy dialogue polish and manual visual and audio review.
 
 ## Stage 0 — Audit

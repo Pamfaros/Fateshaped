@@ -4,6 +4,7 @@
 #include "FSCharacterActions.h"
 #include "AIController.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "BrainComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -38,6 +39,7 @@ AFSCryptEnemy::AFSCryptEnemy()
     GetMesh()->SetRelativeLocation(FVector(0, 0, -89));
     GetMesh()->SetRelativeRotation(FRotator(0, -90, 0));
     GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
     auto* Movement = GetCharacterMovement();
     Movement->bOrientRotationToMovement = false;
     Movement->MaxAcceleration = 1800;
@@ -82,12 +84,13 @@ AFSCryptEnemy::AFSCryptEnemy()
     }
 }
 
-void AFSCryptEnemy::Configure(EFSCryptRole InRole, const FVector& RoomCenter, const FVector2D& RoomHalfExtent, int32 Seed)
+void AFSCryptEnemy::Configure(EFSCryptRole InRole, const FVector& RoomCenter, const FVector2D& RoomHalfExtent, int32 Seed, int32 RoomSlot)
 {
     CombatRole = InRole;
     Home = GetActorLocation();
     BoundsCenter = RoomCenter;
     BoundsHalfExtent = RoomHalfExtent;
+    SpawnSlot = RoomSlot;
     Random.Initialize(Seed);
     OrbitSide = Random.RandRange(0, 1) ? 1 : -1;
 
@@ -109,7 +112,7 @@ void AFSCryptEnemy::Configure(EFSCryptRole InRole, const FVector& RoomCenter, co
     const int32 Start = bTroll ? 9 : 0;
     Idle = EnemyClips[Start];
     Walk = EnemyClips[Start + (bTroll ? 1 : 2)];
-    Attacks = {EnemyClips[Start + 3], EnemyClips[Start + 4], EnemyClips[Start + 5], EnemyClips[Start + 6]};
+    Attacks = {EnemyClips[Start + 5], EnemyClips[Start + 3], EnemyClips[Start + 6], EnemyClips[Start + 5]};
     React = EnemyClips[Start + 7];
     Death = EnemyClips[Start + 8];
 }
@@ -137,7 +140,12 @@ void AFSCryptEnemy::Tick(float DeltaSeconds)
     {
         AddMovementInput(MoveDirection);
     }
-    UpdateLabel(UGameplayStatics::GetPlayerCharacter(this, 0));
+    ACharacter* Player = UGameplayStatics::GetPlayerCharacter(this, 0);
+    if (ImpactPosition <= 0.0f || !GetMesh()->GetSingleNodeInstance())
+    {
+        UpdateAttack(Player, GetWorld()->GetTimeSeconds());
+    }
+    UpdateLabel(Player);
 }
 
 void AFSCryptEnemy::SetAnimation(UAnimSequence* Clip, bool bLoop, float Rate)
@@ -179,17 +187,113 @@ bool AFSCryptEnemy::CanSee(const ACharacter& Player) const
         && !PlayerIsDefeated(Player) && UFSCharacterActions::HasClearStrike(this, &Player);
 }
 
-bool AFSCryptEnemy::AnotherEnemyIsAttacking() const
+void AFSCryptEnemy::GetRoomAllies(TArray<const AFSCryptEnemy*>& Allies) const
 {
     for (TActorIterator<AFSCryptEnemy> Other(GetWorld()); Other; ++Other)
     {
-        if (*Other != this && !Other->bDead && Other->BoundsCenter.Equals(BoundsCenter)
-            && Other->Action >= EAction::Cut && Other->Action <= EAction::Lunge)
+        if (*Other != this && !Other->bDead && Other->BoundsCenter.Equals(BoundsCenter))
         {
-            return true;
+            Allies.Add(*Other);
         }
     }
-    return false;
+}
+
+FVector AFSCryptEnemy::GetAttackPosition(const FVector& Target, const TArray<const AFSCryptEnemy*>& Allies) const
+{
+    const AFSCryptEnemy* Anchor = this;
+    for (const AFSCryptEnemy* Ally : Allies)
+    {
+        if (Ally->CombatRole > Anchor->CombatRole || (Ally->CombatRole == Anchor->CombatRole && Ally->SpawnSlot < Anchor->SpawnSlot))
+        {
+            Anchor = Ally;
+        }
+    }
+
+    FVector Front = (Anchor->GetActorLocation() - Target).GetSafeNormal2D();
+    if (Front.IsNearlyZero())
+    {
+        Front = (Anchor->Home - Target).GetSafeNormal2D();
+    }
+    if (Front.IsNearlyZero())
+    {
+        Front = FVector::ForwardVector;
+    }
+
+    int32 Rank = 0;
+    for (const AFSCryptEnemy* Ally : Allies)
+    {
+        Rank += Ally != Anchor && Ally->SpawnSlot < SpawnSlot;
+    }
+    const double Angles[] = {82.0, -82.0, 162.0};
+    const double PreferredAngle = Anchor == this ? 0.0 : Angles[FMath::Min(Rank, 2)];
+    const double Radius = CombatRole == EFSCryptRole::Skirmisher ? 168.0 : 197.0;
+    const FVector Desired = Target + Front.RotateAngleAxis(PreferredAngle, FVector::UpVector) * Radius;
+    FVector Best = Desired;
+    double BestScore = -TNumericLimits<double>::Max();
+    for (const double Offset : {0.0, 35.0, -35.0, 70.0, -70.0, 140.0, -140.0})
+    {
+        const FVector Slot = Target + Front.RotateAngleAxis(PreferredAngle + Offset, FVector::UpVector) * Radius;
+        if (!IsInRoom(Slot, 58))
+        {
+            continue;
+        }
+        double Score = -FMath::Abs(Offset) - 0.035 * FVector::Dist2D(Slot, GetActorLocation());
+        for (const AFSCryptEnemy* Ally : Allies)
+        {
+            const double Clearance = FVector::Dist2D(Slot, Ally->GetActorLocation());
+            Score -= FMath::Max(0.0, 145.0 - Clearance) * (Ally == Anchor ? 1.5 : 0.8);
+        }
+        if (Score > BestScore)
+        {
+            BestScore = Score;
+            Best = Slot;
+        }
+    }
+    return Best;
+}
+
+FVector AFSCryptEnemy::SteerAroundAllies(const FVector& Direction, const TArray<const AFSCryptEnemy*>& Allies) const
+{
+    const FVector Position = GetActorLocation();
+    const FVector Test = Position + Direction * 118.0;
+    for (const AFSCryptEnemy* Ally : Allies)
+    {
+        const FVector Separation = (Position - Ally->GetActorLocation()).GetSafeNormal2D();
+        if (FVector::DistSquared2D(Test, Ally->GetActorLocation()) < FMath::Square(110.0)
+            && FVector::DotProduct(Separation, Direction) < 0.0)
+        {
+            const FVector Side = FVector::CrossProduct(FVector::UpVector, Separation);
+            const FVector First = FVector::DotProduct(Side, Direction) >= 0.0 ? Side : -Side;
+            for (const FVector Bypass : {First, -First})
+            {
+                if (IsInRoom(Position + Bypass * 115.0, 56))
+                {
+                    return (Bypass + Separation * 0.3).GetSafeNormal2D();
+                }
+            }
+        }
+    }
+    return Direction;
+}
+
+bool AFSCryptEnemy::CanCommitAttack(const FVector& Target, const TArray<const AFSCryptEnemy*>& Allies, double ImpactTime) const
+{
+    const FVector Bearing = (GetActorLocation() - Target).GetSafeNormal2D();
+    int32 ActiveAttacks = 0;
+    for (const AFSCryptEnemy* Ally : Allies)
+    {
+        if (!Ally->IsWindingUp())
+        {
+            continue;
+        }
+        ++ActiveAttacks;
+        const FVector AllyBearing = (Ally->GetActorLocation() - Target).GetSafeNormal2D();
+        if (FVector::DotProduct(Bearing, AllyBearing) > 0.5 || FMath::Abs(ImpactTime - Ally->ExpectedImpact) < 0.28)
+        {
+            return false;
+        }
+    }
+    return ActiveAttacks < 2;
 }
 
 bool AFSCryptEnemy::TryBehavior(EFSCryptBranch Branch)
@@ -219,7 +323,7 @@ bool AFSCryptEnemy::TryBehavior(EFSCryptBranch Branch)
         {
             return false;
         }
-        if (Now < ActionEnd)
+        if (IsWindingUp() || Now < ActionEnd)
         {
             return true;
         }
@@ -227,10 +331,6 @@ bool AFSCryptEnemy::TryBehavior(EFSCryptBranch Branch)
         MoveDirection = FVector::ZeroVector;
         if (Action >= EAction::Cut && Action <= EAction::Lunge)
         {
-            if (Player && !PlayerIsDefeated(*Player))
-            {
-                ResolveHit(*Player);
-            }
             const bool bFollowUp = bCombo && bEngaged && Distance < 340.0 && IsInRoom(Target);
             bCombo = false;
             if (bFollowUp)
@@ -240,8 +340,8 @@ bool AFSCryptEnemy::TryBehavior(EFSCryptBranch Branch)
             else
             {
                 Action = EAction::Recover;
-                ActionEnd = Now + (bBoss ? 0.90 : 0.67);
-                NextAttack = ActionEnd + Random.FRandRange(0.1f, 0.42f);
+                ActionEnd = Now + (bBoss ? 0.36 : 0.19);
+                NextAttack = ActionEnd + Random.FRandRange(0.08f, 0.25f);
             }
             return true;
         }
@@ -293,33 +393,67 @@ bool AFSCryptEnemy::TryBehavior(EFSCryptBranch Branch)
         return true;
 
     case EFSCryptBranch::Attack:
-        if (!bEngaged || !IsInRoom(Target) || Now < NextAttack || Distance > (bBoss ? 560.0 : 235.0) || AnotherEnemyIsAttacking())
+    {
+        if (!bEngaged || !IsInRoom(Target) || Now < NextAttack || Distance > (bBoss ? 490.0 : 235.0))
         {
             return false;
         }
+        EAction Attack = bLight && PreviousAttack != EAction::Cut ? EAction::Cut : EAction::Sweep;
         if (bBoss)
         {
-            const bool bEnraged = Health <= MaxHealth * 0.5f;
-            const EAction Attack = Distance > 320.0 ? EAction::Lunge
+            Attack = Distance > 300.0 ? EAction::Lunge
                 : PreviousAttack == EAction::Stomp ? EAction::Sweep : EAction::Stomp;
-            bCombo = bEnraged && Attack != EAction::Sweep;
-            StartAttack(Attack, Target, Now);
         }
-        else
+        TArray<const AFSCryptEnemy*> Allies;
+        GetRoomAllies(Allies);
+        if (!CanCommitAttack(Target, Allies, Now + GetWindup(Attack)))
         {
-            StartAttack(bLight && PreviousAttack != EAction::Cut ? EAction::Cut : EAction::Sweep, Target, Now);
+            return false;
         }
+        if (!Allies.IsEmpty() && FVector::DistSquared2D(Position, GetAttackPosition(Target, Allies)) > FMath::Square(98.0))
+        {
+            return false;
+        }
+        bCombo = bBoss && Health <= MaxHealth * 0.5f && Attack != EAction::Sweep;
+        StartAttack(Attack, Target, Now);
         return true;
+    }
 
     case EFSCryptBranch::Position:
+    {
         if (!bEngaged)
         {
             return false;
         }
         Face(Target);
+        TArray<const AFSCryptEnemy*> Allies;
+        GetRoomAllies(Allies);
+        if (!Allies.IsEmpty())
+        {
+            const FVector Slot = GetAttackPosition(Target, Allies);
+            if (IsInRoom(Slot, 45))
+            {
+                FVector Direction = (Slot - Position).GetSafeNormal2D();
+                const FVector FromTarget = -ToTarget;
+                const FVector DesiredBearing = (Slot - Target).GetSafeNormal2D();
+                if (FVector::DotProduct(FromTarget, DesiredBearing) < 0.50 && Distance < 340)
+                {
+                    const FVector Side = FVector::CrossProduct(FVector::UpVector, FromTarget);
+                    const double Turn = FVector::DotProduct(Side, DesiredBearing) >= 0.0 ? 1.0 : -1.0;
+                    Direction = (Side * Turn + FromTarget * (Distance < 175 ? 0.65 : -0.12)).GetSafeNormal2D();
+                }
+                Direction = FVector::DistSquared2D(Position, Slot) < FMath::Square(38.0)
+                    ? FVector::ZeroVector : SteerAroundAllies(Direction, Allies);
+                if (IsInRoom(Position + Direction * 90, 45))
+                {
+                    MoveAlong(Direction, bLight ? 345.0f : 255.0f);
+                    return true;
+                }
+            }
+        }
         if (Distance > (bLight ? 170.0 : 215.0) && IsInRoom(Position + ToTarget * 90.0, 45))
         {
-            MoveAlong(ToTarget, bLight ? 345.0f : 245.0f);
+            MoveAlong(SteerAroundAllies(ToTarget, Allies), bLight ? 345.0f : 245.0f);
             return true;
         }
         if (Now >= OrbitUntil)
@@ -332,17 +466,80 @@ bool AFSCryptEnemy::TryBehavior(EFSCryptBranch Branch)
             const FVector Direction = (Side - ToTarget * (Distance < 145.0 ? 0.6 : 0.05)).GetSafeNormal2D();
             if (IsInRoom(Position + Direction * 105, 50))
             {
-                MoveAlong(Direction, bLight ? 230.0f : 145.0f);
+                MoveAlong(SteerAroundAllies(Direction, Allies), bLight ? 230.0f : 145.0f);
                 return true;
             }
         }
         return false;
+    }
 
     case EFSCryptBranch::Hold:
         MoveAlong(FVector::ZeroVector, 0);
         return true;
     }
     return false;
+}
+
+float AFSCryptEnemy::GetWindup(EAction Attack) const
+{
+    switch (Attack)
+    {
+    case EAction::Cut: return 0.38f;
+    case EAction::Stomp: return 0.68f;
+    case EAction::Lunge: return 0.57f;
+    default: return 0.53f;
+    }
+}
+
+bool AFSCryptEnemy::IsWindingUp() const
+{
+    return Action >= EAction::Cut && Action <= EAction::Lunge && !bHasImpacted;
+}
+
+void AFSCryptEnemy::OnAttackPoseEvaluated()
+{
+    if (IsWindingUp() && !bDead)
+    {
+        UpdateAttack(UGameplayStatics::GetPlayerCharacter(this, 0), GetWorld()->GetTimeSeconds());
+    }
+}
+
+void AFSCryptEnemy::UpdateAttack(ACharacter* Player, double Now)
+{
+    if (!IsWindingUp())
+    {
+        return;
+    }
+    UAnimSingleNodeInstance* Anim = GetMesh()->GetSingleNodeInstance();
+    const bool bPlayingAttack = ImpactPosition > 0.0f && Anim && Anim->GetAnimationAsset() == PlayingClip;
+    const float Progress = bPlayingAttack ? Anim->GetCurrentTime() / ImpactPosition
+        : 1.0f + static_cast<float>(Now - ExpectedImpact) / GetWindup(Action);
+    if (Action == EAction::Lunge)
+    {
+        const float Travel = 270.0f * FMath::Clamp((Progress - 0.42f) / 0.58f, 0.0f, 1.0f);
+        const FVector Step = StrikeDirection * (Travel - StrikeTravel);
+        if (IsInRoom(GetActorLocation() + Step, 55.0))
+        {
+            AddActorWorldOffset(Step, true);
+        }
+        StrikeTravel = Travel;
+    }
+    if (Progress < 1.0f)
+    {
+        return;
+    }
+    bHasImpacted = true;
+    Telegraph->SetVisibility(false);
+    const float FollowThrough = CombatRole == EFSCryptRole::Warden ? 0.36f : 0.27f;
+    ActionEnd = Now + FollowThrough;
+    if (bPlayingAttack)
+    {
+        Anim->SetPlayRate(FMath::Max(0.1f, (PlayingClip->GetPlayLength() - Anim->GetCurrentTime()) / FollowThrough));
+    }
+    if (IsValid(Player) && !PlayerIsDefeated(*Player))
+    {
+        ResolveHit(*Player);
+    }
 }
 
 void AFSCryptEnemy::StartAttack(EAction Attack, const FVector& Target, double Now)
@@ -354,12 +551,24 @@ void AFSCryptEnemy::StartAttack(EAction Attack, const FVector& Target, double No
     PreviousAttack = Attack;
     StrikeOrigin = GetActorLocation();
     StrikeDirection = GetActorForwardVector().GetSafeNormal2D();
-    const float Windup = Attack == EAction::Cut ? 0.47f : (Attack == EAction::Stomp ? 1.02f : (Attack == EAction::Lunge ? 0.85f : 0.73f));
-    ActionEnd = Now + Windup;
+    const float Windup = GetWindup(Attack);
+    ExpectedImpact = Now + Windup;
+    ActionEnd = ExpectedImpact + 0.22;
+    bHasImpacted = false;
+    ImpactPosition = 0.0f;
+    StrikeTravel = 0.0f;
     const int32 Index = static_cast<int32>(Attack) - static_cast<int32>(EAction::Cut);
     if (UAnimSequence* Clip = Attacks[Index])
     {
-        SetAnimation(Clip, false, FMath::Clamp(Clip->GetPlayLength() * 0.52f / Windup, 0.5f, 1.8f));
+        // These poses are the forward hand extension, troll sweep, and landing in the imported clips.
+        constexpr float OrcContact[] = {0.325f, 0.425f, 0.55f, 0.325f};
+        constexpr float TrollContact[] = {0.30f, 0.25f, 0.55f, 0.30f};
+        ImpactPosition = Clip->GetPlayLength() * (CombatRole == EFSCryptRole::Skirmisher ? OrcContact[Index] : TrollContact[Index]);
+        SetAnimation(Clip, false, ImpactPosition / Windup);
+        if (UAnimSingleNodeInstance* Anim = GetMesh()->GetSingleNodeInstance())
+        {
+            Anim->PostEvaluateAnimEvent.BindDynamic(this, &AFSCryptEnemy::OnAttackPoseEvaluated);
+        }
     }
     ShowTelegraph();
 }
@@ -370,7 +579,7 @@ void AFSCryptEnemy::ShowTelegraph()
     const bool bStomp = Action == EAction::Stomp;
     const bool bLunge = Action == EAction::Lunge;
     Telegraph->SetStaticMesh(bStomp ? WarningDisc : WarningLane);
-    const double Length = bStomp ? 540.0 : (bLunge ? 620.0 : (bBoss ? 340.0 : 245.0));
+    const double Length = bStomp ? 540.0 : (bLunge ? 540.0 : (bBoss ? 340.0 : 245.0));
     const double Width = bStomp ? Length : (bLunge ? 175.0 : (bBoss ? 380.0 : 215.0));
     const FVector Center = StrikeOrigin + (bStomp ? FVector::ZeroVector : StrikeDirection * (Length * 0.5)) - FVector(0, 0, 85);
     Telegraph->SetWorldLocationAndRotation(Center, StrikeDirection.Rotation());
@@ -389,20 +598,13 @@ void AFSCryptEnemy::ResolveHit(ACharacter& Player)
     const bool bStomp = Action == EAction::Stomp;
     const bool bLunge = Action == EAction::Lunge;
     const bool bInside = bStomp ? Offset.SizeSquared2D() <= FMath::Square(270.0)
-        : Along >= 0 && Along <= (bLunge ? 620.0 : Range) && Across <= (bLunge ? 87.5 : (bBoss ? 190.0 : 107.5));
+        : Along >= 0 && Along <= (bLunge ? 540.0 : Range) && Across <= (bLunge ? 87.5 : (bBoss ? 190.0 : 107.5))
+            && (!bLunge || FVector::DistSquared2D(Player.GetActorLocation(), GetActorLocation()) <= FMath::Square(270.0));
     const bool bClear = UFSCharacterActions::HasClearStrike(this, &Player);
     if (bInside && bClear && FMath::Abs(Offset.Z) <= (bStomp ? 105.0 : 160.0))
     {
         const float Damage = bBoss ? (bStomp ? 26 : 21) : (CombatRole == EFSCryptRole::Vanguard ? 16 : 12);
         UGameplayStatics::ApplyDamage(&Player, Damage, GetController(), this, nullptr);
-    }
-    if (bLunge)
-    {
-        const FVector Destination = StrikeOrigin + StrikeDirection * FMath::Clamp(Along - 120.0, 100.0, 400.0);
-        if (IsInRoom(Destination, 65))
-        {
-            GetCharacterMovement()->AddImpulse(StrikeDirection * 650.0, true);
-        }
     }
 }
 

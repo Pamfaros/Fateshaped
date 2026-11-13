@@ -265,7 +265,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
 
     FRandomStream Random(RunId);
     TArray<AFSCryptEnemy*> Spawned;
-    const auto SpawnEnemy = [&](const FRoom& Room, EFSCryptRole EnemyRole, FIntPoint Offset, FName Tag = NAME_None)
+    const auto SpawnEnemy = [&](const FRoom& Room, EFSCryptRole EnemyRole, FIntPoint Offset, FName Tag = NAME_None, int32 RoomSlot = 0)
     {
         const FTransform Transform(FRotator::ZeroRotator, TileCenter(Room.Center + Offset, 94));
         AFSCryptEnemy* Enemy = GetWorld()->SpawnActorDeferred<AFSCryptEnemy>(AFSCryptEnemy::StaticClass(), Transform,
@@ -274,7 +274,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
         {
             Enemy->SetActorTransform(Transform);
             Enemy->Configure(EnemyRole, TileCenter(Room.Center), FVector2D((Room.HalfSize.X + 0.5) * TileSize, (Room.HalfSize.Y + 0.5) * TileSize),
-                Random.GetUnsignedInt());
+                Random.GetUnsignedInt(), RoomSlot);
             if (!Tag.IsNone())
             {
                 Enemy->Tags.Add(Tag);
@@ -317,10 +317,11 @@ bool AFSDungeonLayout::Build(int32 RunId)
         while (!EnemyBag.IsEmpty() && Random.FRand() < SpawnChance)
         {
             const int32 Pick = Random.RandRange(0, EnemyBag.Num() - 1);
-            if (!SpawnEnemy(Room, EnemyBag[Pick], Positions[Slot++]))
+            if (!SpawnEnemy(Room, EnemyBag[Pick], Positions[Slot], NAME_None, Slot))
             {
                 break;
             }
+            ++Slot;
             EnemyBag.RemoveAtSwap(Pick, EAllowShrinking::No);
         }
     }
