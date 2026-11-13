@@ -5,7 +5,11 @@
 #include "FSDungeonLayout.generated.h"
 
 class UInstancedStaticMeshComponent;
+class UMaterialInterface;
+class UPointLightComponent;
 class UStaticMesh;
+class UStaticMeshComponent;
+class UTextRenderComponent;
 
 UCLASS(NotBlueprintable)
 class AFSDungeonLayout : public AActor
@@ -22,7 +26,27 @@ public:
     static bool HasReachedExit(const AActor* Player);
 
 private:
+    virtual void Tick(float DeltaSeconds) override;
     bool Build(int32 RunId);
+    void AddTrap(const FVector& Center, bool bSpikes, bool bAlongX);
+
+    struct FTrap
+    {
+        enum class EPhase : uint8 { Idle, Warning, Active, Recovering };
+
+        FVector Center;
+        FVector HalfExtent;
+        TArray<UStaticMeshComponent*> Hazards;
+        UPointLightComponent* Light = nullptr;
+        UTextRenderComponent* Label = nullptr;
+        EPhase Phase = EPhase::Idle;
+        double NextPhase = 0.0;
+        double NextDamage = 0.0;
+        bool bSpikes = false;
+    };
+
+    void SetTrapPhase(FTrap& Trap, FTrap::EPhase Phase, double Time);
+    TArray<FTrap> Traps;
 
     UPROPERTY()
     TObjectPtr<UInstancedStaticMeshComponent> Floor;
@@ -38,6 +62,21 @@ private:
 
     UPROPERTY()
     TObjectPtr<UStaticMesh> BarrelMesh;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMesh> ChestMesh;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMesh> PipeMesh;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMesh> SpikeMesh;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMesh> FumeMesh;
+
+    UPROPERTY()
+    TObjectPtr<UMaterialInterface> TelegraphMaterial;
 
     FVector ExitCenter = FVector::ZeroVector;
 };
