@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-113 synchronizes enemy damage with the contact poses and lets mixed groups attack from different angles. Extracted RC10 starts in Guild. **Next P0:** play a full RC10 expedition with normal controls and verify the updated combat and reward persistence. See DEVLOG for the exact verification scope.
+**Current task** — FS-114 drives enemy hitboxes from the animation timeline. Windows RC11 passes startup. **Next P0:** play a full RC11 expedition with normal controls and verify combat readability and reward persistence. See DEVLOG for the exact verification scope.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -61,6 +61,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-111 · Mana cap and resource labels — COMPILED + PIE_TESTED.** Mana starts at zero before evolution, fills to 60 on unlocking Spellsword and stays capped at 60 after regeneration. The combat HUD formats V/S/M to one decimal place. The imported VitalSystems components remain available as a reference for a later migration.
 - **FS-112 · Crypt enemies and Warden — COMPILED + PIE_TESTED.** A seeded finite bag supplies up to four optional foes alongside the guardian and boss. Combat runs an Unreal Behavior Tree with attack, defensive, positioning and leash branches. The Warden must fall before the exit opens. Scripted PIE verified a normal melee hit, telegraphed boss damage, a frontal block, quest completion and XP. NVIDIA ACE availability and manual tuning are recorded in DEVLOG.
 - **FS-113 · Enemy hit timing and group positioning — COMPILED + PIE_TESTED.** Damage resolves when the attack clip reaches its contact pose. The Warden advances during the lunge. Vanguard holds the front while Skirmishers seek separate angles. Scripted PIE observed three attackers from different directions in one room and up to two concurrent windups.
+- **FS-114 · Animation-driven attack hitboxes — COMPILED + PIE_TESTED + PACKAGED_TESTED (startup).** Attack clips and warnings start together. Clips keep their per-attack playback rate. Damage requires capsule contact during the animation's active window, at most once per attack. Scripted PIE checked hits, misses, and a timed dodge.
 - **P1 — TODO.** Fairy dialogue polish and manual visual and audio review.
 
 ## Stage 0 — Audit

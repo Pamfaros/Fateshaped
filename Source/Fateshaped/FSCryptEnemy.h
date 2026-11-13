@@ -37,24 +37,32 @@ protected:
 private:
     enum class EAction : uint8 { None, Cut, Sweep, Stomp, Lunge, Guard, Evade, Recover };
 
+    struct FAttackWindow
+    {
+        float Open;
+        float Close;
+        float PlayRate;
+    };
+
     void SetAnimation(UAnimSequence* Clip, bool bLoop, float Rate = 1.0f);
     void Face(const FVector& Point);
     void MoveAlong(const FVector& Direction, float Speed);
     void StartAttack(EAction Attack, const FVector& Target, double Now);
-    UFUNCTION()
     void OnAttackPoseEvaluated();
 
-    void UpdateAttack(ACharacter* Player, double Now);
+    bool IsAttacking() const;
     bool IsWindingUp() const;
     void ShowTelegraph();
-    void ResolveHit(ACharacter& Player);
+    void TestAttackHitbox(const FVector& From, const FVector& To, const FVector& BodyFrom, const FVector& BodyTo);
+    FName GetAttackSocket() const;
     bool CanSee(const ACharacter& Player) const;
     bool IsInRoom(const FVector& Position, double Padding = 0.0) const;
     void GetRoomAllies(TArray<const AFSCryptEnemy*>& Allies) const;
     FVector GetAttackPosition(const FVector& Target, const TArray<const AFSCryptEnemy*>& Allies) const;
     FVector SteerAroundAllies(const FVector& Direction, const TArray<const AFSCryptEnemy*>& Allies) const;
     bool CanCommitAttack(const FVector& Target, const TArray<const AFSCryptEnemy*>& Allies, double ImpactTime) const;
-    float GetWindup(EAction Attack) const;
+    FAttackWindow GetAttackWindow(EAction Attack) const;
+    double GetTimeUntilContact(EAction Attack) const;
     void UpdateLabel(ACharacter* Player);
 
     UPROPERTY()
@@ -116,9 +124,12 @@ private:
     EAction PreviousAttack = EAction::None;
     double ActionEnd = 0.0;
     double ExpectedImpact = 0.0;
-    float ImpactPosition = 0.0f;
+    float PreviousAttackPose = 0.0f;
     float StrikeTravel = 0.0f;
-    bool bHasImpacted = false;
+    FVector PreviousHitboxCenter = FVector::ZeroVector;
+    FVector PreviousBodyCenter = FVector::ZeroVector;
+    bool bHitPlayer = false;
+    bool bAttackFinished = true;
     double NextAttack = 0.0;
     double NextDefense = 0.0;
     double LastHit = -10.0;
