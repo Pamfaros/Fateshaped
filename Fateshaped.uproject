@@ -3,6 +3,9 @@
 	"EngineAssociation": "5.8",
 	"Category": "",
 	"Description": "",
+	"Modules": [
+		{ "Name": "Fateshaped", "Type": "Runtime", "LoadingPhase": "Default" }
+	],
 	"Plugins": [
 		{
 			"Name": "ModelingToolsEditorMode",
