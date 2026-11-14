@@ -242,3 +242,8 @@ Add a short entry per checkpoint or blocker, newest first. Capture the test resu
 - Placed the imported `EssenceAltar` mesh in `L_Guild` as `FS_EssenceAltar`, with an editable text component and the `EssenceAltar` actor tag. The combat component finds the placed altar by tag and uses its current transform for interaction. The runtime marker spawn was removed.
 - **COMPILED / PIE_TESTED:** saved the map through Unreal MCP, then compiled the Win64 Editor module. Reopening the map verified one tagged actor and no collision on its mesh. An isolated PIE session rejected interaction from spawn, allowed it nearby, canceled one selection and saved a subsequent Barbarian selection. The text faced the camera. Evidence is in `Saved/FS115QA/Altar121.json`. Packaged testing is pending.
 - Proposed local checkpoint `fix(guild): place the essence altar in the level`. Include the combat source edits, map, altar mesh dependencies and tracking entries when staging the milestone. Next P0 is a normal-input packaged expedition.
+
+## 2026-11-14 · Class asset production handoff
+
+- **CREATED (documentation):** `FATESHAPED_CLASS_ASSET_CHECKLIST.md` covers all 12 classes, shared animation and gear, VFX, audio, UI, optional presentation assets and English production prompts. Cross-checked against the class cards, code and test report. No Unreal assets were generated or modified for this handoff. Runtime asset acceptance remains pending.
+- Proposed local checkpoint `docs(gameplay): plan class assets and production prompts` for the checklist and tracker entries. Next P0 remains a normal-input packaged expedition.

@@ -71,6 +71,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 
 - **FS-120 · Class combat and HUD fixes — COMPILED + PIE_TESTED + PACKAGED_TESTED (startup).** 34 of 34 class checks, seven recall checks, three input follow-ups and six Seal/practice cases passed. See the class report for rendered samples and remaining animation acceptance work.
 - **FS-121 · Level-placed Essence Altar — COMPILED + PIE_TESTED.** `FS_EssenceAltar` is editable in the `L_Guild` Outliner and references the imported altar mesh. A fresh PIE session found one altar, rejected distant interaction, and saved Barbarian through the nearby interaction. Packaged verification is pending.
+- **Class asset production handoff — CREATED (documentation).** [Asset checklist and prompts](FATESHAPED_CLASS_ASSET_CHECKLIST.md) lists the shared kit, all 12 paths, reusable candidates and acceptance criteria. Begin with Fury Leap, Shield Advance and the Orb forms after the packaged P0 check.
 
 ## Stage 0 — Audit
 
