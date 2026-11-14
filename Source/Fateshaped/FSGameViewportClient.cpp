@@ -26,6 +26,8 @@ namespace
 {
 constexpr TCHAR AudioSection[] = TEXT("Fateshaped.Audio");
 constexpr TCHAR MasterVolumeKey[] = TEXT("MasterVolume");
+constexpr TCHAR InputSection[] = TEXT("Fateshaped.Input");
+constexpr TCHAR VibrationKey[] = TEXT("VibrationIntensity");
 const FLinearColor Gold(0.91f, 0.69f, 0.35f);
 const FLinearColor Parchment(0.90f, 0.86f, 0.76f);
 const FLinearColor Panel(0.035f, 0.041f, 0.046f);
@@ -58,6 +60,7 @@ public:
     void Construct(const FArguments& Args)
     {
         Volume = Args._InitialVolume;
+        GConfig->GetFloat(InputSection, VibrationKey, Vibration, GGameUserSettingsIni);
         OnVolumeChanged = Args._OnVolumeChanged;
         OnVolumeCommitted = Args._OnVolumeCommitted;
         OnResume = Args._OnResume;
@@ -156,6 +159,26 @@ private:
                 .OnMouseCaptureEnd_Lambda([this] { OnVolumeCommitted.ExecuteIfBound(); })
                 .OnControllerCaptureEnd_Lambda([this] { OnVolumeCommitted.ExecuteIfBound(); })
             ]
+            + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 16)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().FillWidth(1)
+                [ SNew(STextBlock).Text(LOCTEXT("Vibration", "Controller Vibration")).ColorAndOpacity(Parchment) ]
+                + SHorizontalBox::Slot().AutoWidth()
+                [
+                    SNew(SButton)
+                    .OnClicked_Lambda([this]
+                    {
+                        Vibration = Vibration > 0.75f ? 0.5f : Vibration > 0.25f ? 0.0f : 1.0f;
+                        GConfig->SetFloat(InputSection, VibrationKey, Vibration, GGameUserSettingsIni);
+                        GConfig->Flush(false, GGameUserSettingsIni);
+                        return FReply::Handled();
+                    })
+                    [
+                        SNew(STextBlock).Text_Lambda([this] { return FText::AsPercent(Vibration); }).ColorAndOpacity(Gold)
+                    ]
+                ]
+            ]
             + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 22)
             [
                 SNew(SHorizontalBox)
@@ -248,6 +271,7 @@ private:
     FSimpleDelegate OnResume;
     FSimpleDelegate OnQuit;
     float Volume = 1.0f;
+    float Vibration = 1.0f;
     bool bConfirmQuit = false;
 };
 

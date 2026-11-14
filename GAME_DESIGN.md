@@ -8,7 +8,7 @@ The owner replaced the single-run route with a persistent RPG loop. Where this s
 
 **Loop.** Launch → Guild Hub (`L_Guild`) → accept quest → portal activates → dungeon (`L_Dungeon_01`) → complete objective → rewards → return to guild → level up → choose essence → repeat. Character progression persists between runs and game restarts. Death ends the run without rewards and returns the player to the guild.
 
-**Guild Hub.** Restores character state; shows level, XP and inventory; hosts the quest board, the quest portal and Gerald, the fairy who looks like a middle-aged man. On first launch he introduces the guild; afterwards `IntroCompleted` is saved and he stays at reception with a short line.
+**Guild Hub.** Restores character state, shows level, XP and inventory, and hosts the quest portal and Gerald, the fairy who looks like a middle-aged man. He introduces the Guild once and issues contracts at reception after the first essence choice.
 
 **Quest.** Data: ID, name, description, minimum level, target dungeon, completion condition, XP reward, item reward. First quest: *The Forgotten Crypt* (`Q_ForgottenCrypt`): defeat the crypt's final enemy; reward 120 XP and one Crypt Shard. Rewards are granted exactly once per accepted run (run ID compared with the last rewarded run ID in the save).
 

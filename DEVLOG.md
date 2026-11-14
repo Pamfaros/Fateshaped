@@ -247,3 +247,48 @@ Add a short entry per checkpoint or blocker, newest first. Capture the test resu
 
 - **CREATED (documentation):** `FATESHAPED_CLASS_ASSET_CHECKLIST.md` covers all 12 classes, shared animation and gear, VFX, audio, UI, optional presentation assets and English production prompts. Cross-checked against the class cards, code and test report. No Unreal assets were generated or modified for this handoff. Runtime asset acceptance remains pending.
 - Proposed local checkpoint `docs(gameplay): plan class assets and production prompts` for the checklist and tracker entries. Next P0 remains a normal-input packaged expedition.
+
+## 2026-11-14 · FS-122 Shared animation, HUD and feedback
+
+- Retargeted Fantasy Pack neutral idle, straight walk/run, jump phases and armed hit/defeat clips to the active player mannequin. Updated `ABP_Unarmed` and forward samples in `BS_Idle_Walk_Run`. Existing directional samples cover strafe and turns. S/M evade uses retargeted LandingRoll, while V uses its existing Backstep. Added eight user-supplied HUD icons, ordered class previews and a blocked spell-emitter reticle.
+- Added 16 procedural placeholder WAV cues for UI, stone footsteps, jump/land, evade cloth, practice contact and wall stop. The altar plays the existing evolution effect after a successful save. Weapon and projectile hit feedback uses the sampled contact where available. Added controller vibration for contact, mitigation and projectile casting, with persisted 100%, 50% and off settings.
+- **COMPILED / PIE_TESTED:** Win64 Editor and animation Blueprint compiled. Rendered PIE showed the altar with its icons and class preview, and the S/M roll played the retargeted clip and moved 340 cm in a clear Crypt lane. The scripted hit and defeat played the Fantasy Pack clips. All 34 class checks passed. HUD capture was 1355 × 717. Sound playback mix, hardware rumble, the requested three viewport sizes and the packaged build are **NOT_TESTED** for this change. Evidence is in `Saved/FS115QA/TestShared122b.json` and `ClassShared122.json`.
+- The three dedicated upper-body aim poses and transitions, shield recoil additive, stone chips and platform-specific artwork remain open. Proposed local checkpoint `feat(gameplay): integrate shared animation and class feedback`. Next P0 is a normal-input packaged expedition.
+
+## 2026-11-14 · FS-123 Jump phases, defeat, roll and footsteps
+
+- Verified the saved Animation Blueprint binds the Fantasy Pack start, air loop and landing phases. Defeat locks movement, disables its movement mode and holds the final collapse pose. Return to Guild remains available.
+- Added a root-locked retargeted roll copy. The capsule uses the clip's longitudinal pace for up to 340 cm over 0.90 s. Collision can end travel while the pose and immunity continue. Backstep keeps its separate timing. Imported the two supplied footstep tracks and selected them by level.
+- **COMPILED / PIE_TESTED:** rendered PIE exercised takeoff, descent and landing. Wizard rolled 340 cm, ignored a 5-point hit at 0.845 s and took a 5-point hit after the roll. Defeat preserved the pose and position after repeated input. Returning to Guild restored movement. Both footstep SoundWaves imported and exported as distinct 1-second clips. Audio mix and packaged behavior remain **NOT_TESTED**. Evidence is in `Saved/FS115QA/Movement123.json`. Proposed checkpoint `fix(gameplay): synchronize roll and lock defeated players`.
+
+## 2026-11-14 · FS-124 Gerald issues Guild contracts
+
+- Rewired `BP_PlayerCombat` so Gerald's reception interaction leads to the existing contract checks and run setup after his introduction. His nearby prompt includes the quest title, objective and reward. Removed the board and its label from `L_Guild` through Unreal MCP. Updated the Guild prompt and current design references.
+- **COMPILED / PIE_TESTED:** compiled Win64 Editor and the player Blueprint. An isolated rendered PIE fixture confirmed the board and label were absent, the intro only played once, and Gerald refused acceptance before choosing an essence and out of range. After choosing Barbarian, Gerald offered the contract, assigned run ID 1 only once and opened the portal. The fixture completed the expedition with scripted positioning and damage, received 280 XP and a Crypt Shard, returned to Guild and accepted run ID 2. See `Saved/FS115QA/Gerald124Test.json`. Normal-input packaged testing is pending. Proposed local checkpoint `feat(guild): move quest acceptance to Gerald`.
+
+## 2026-11-14 · FS-125 Responsive HUD and altar controls
+
+- Applied aspect-ratio-aware viewport scaling to HUD positions, text, bars, icons and reticle. Enlarged the existing action and essence icons and added prominent keyboard labels for skill slots. Projected targeting cues retain their world alignment.
+- Up, Down and mouse wheel navigate the altar menu. Horizontal navigation and D-pad support remain available. Opening the menu locks movement and clears pending movement input. Confirm, cancel and teardown release the lock.
+- **COMPILED / PIE_TESTED:** an isolated rendered run changed the viewport to 640 × 360, 1280 × 720 and 1920 × 1080 and captured the HUD and altar at each size. Simulated viewport key events verified both wheel directions, vertical arrows, wraparound, stationary position, cancel and confirmation. See `Saved/FS115QA/Hud125.json`. The temporary test driver was removed. Packaged testing is pending. Proposed checkpoint `feat(ui): scale HUD and improve essence navigation`.
+
+## 2026-11-14 · FS-126 Footstep pitch variation
+
+- Applied mild pitch variation at footstep emission for both existing level-specific tracks. Each pitch stays between 0.94× and 1.06× and differs from the previous multiplier by at least 0.025. Kept the existing emission distance and volume.
+- **COMPILED:** Win64 Editor target succeeded. A 10,000-sample numerical probe checked the bounds and successive pitch spacing. In-game listening and packaged validation remain **NOT_TESTED**. Proposed local checkpoint `fix(audio): vary successive footstep pitches`. The next P0 remains a normal-input packaged expedition.
+
+## 2026-11-14 · FS-127 Shared footstep Sound Cue
+
+- Routed footsteps in Guild and the Crypt through the supplied `/Game/Audio/Sounds/SC_Footstep` cue. The cue references five tile waves from FootstepsMiniPack. Existing pitch jitter, cadence and volume remain in place.
+- **COMPILED / PIE_TESTED:** Win64 Editor compiled and a scripted walk activated the cue in Guild and the Crypt. The live audio mixer logged Tile_Mono_04 in Guild and Tile_Mono_05 in the Crypt. See `Saved/FS115QA/Steps127.json` and its log. Packaged verification remains pending. Proposed checkpoint `fix(audio): use shared footstep sound cue`, including the cue and its tile waves. Next P0 is the normal-input packaged expedition.
+
+## 2026-11-14 · FS-128 Shared jump and planted basic attacks
+
+- Confirmed the shared player Animation Blueprint uses the retargeted Fantasy Pack jump start, air loop and landing. Basic axe, sword and Spark attacks clear existing movement and reject further movement input through their action window. Completion and allowed action changes release the lock. Damage continues through the existing active weapon sweep or projectile contact.
+- **COMPILED / PIE_TESTED:** all 12 paths completed takeoff, ascent, descent and landing with the shared animation graph. The seven attack fixtures measured zero movement under repeated input during basic attacks and movement after release. Axe, sword and Spark hits dealt 34, 22 and 12 damage. Their misses and a wall-blocked Spark dealt zero. See `Saved/FS115QA/Jump128.json` and `Attack128Locked.json`. Packaged testing is pending. Proposed local checkpoint `fix(combat): lock movement during basic attacks` on `feat/guild-essence-persistence`. Next P0 remains a normal-input packaged expedition.
+
+## 2026-11-14 · FS-129 Authored player leg motion
+
+- Connected the shared player montage slot directly to the output pose in `ABP_Unarmed` and removed the final foot-placement Control Rig pass. This also removes terrain foot planting for that player graph. The retargeted Fantasy Pack takeoff, repeating air loop and single landing clips remain assigned across all classes.
+- **COMPILED / PIE_TESTED:** saved and compiled the AnimBP. Reopened it in isolated rendered PIE and sampled leg motion during a completed jump on every class. Foot separation changed by 34.46–34.70 cm across the runs. An earlier debug fixture crashed Unreal while querying an internal animation state API with a raw index, so the repeat used public bone and movement sampling. See `Saved/FS115QA/Pose129Edit.json` and `Pose129Verify.json`. Packaged testing is pending. Proposed checkpoint `fix(animation): preserve authored player leg motion`.
+- The seven basic-attack cases also passed with the new pose output, including melee hit and miss and wall-blocked Spark. See `Saved/FS115QA/Pose129Attack.json`.

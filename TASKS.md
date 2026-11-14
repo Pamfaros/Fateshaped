@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-121 moves the Essence Altar into the Guild level and verifies selection in PIE. **Next P0:** complete a normal-input packaged expedition and verify the victory screen, reward persistence and return to Guild.
+**Current task** — FS-125 scales the HUD to the viewport and adds mouse-wheel and vertical arrow navigation at the altar. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -72,6 +72,14 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-120 · Class combat and HUD fixes — COMPILED + PIE_TESTED + PACKAGED_TESTED (startup).** 34 of 34 class checks, seven recall checks, three input follow-ups and six Seal/practice cases passed. See the class report for rendered samples and remaining animation acceptance work.
 - **FS-121 · Level-placed Essence Altar — COMPILED + PIE_TESTED.** `FS_EssenceAltar` is editable in the `L_Guild` Outliner and references the imported altar mesh. A fresh PIE session found one altar, rejected distant interaction, and saved Barbarian through the nearby interaction. Packaged verification is pending.
 - **Class asset production handoff — CREATED (documentation).** [Asset checklist and prompts](FATESHAPED_CLASS_ASSET_CHECKLIST.md) lists the shared kit, all 12 paths, reusable candidates and acceptance criteria. Begin with Fury Leap, Shield Advance and the Orb forms after the packaged P0 check.
+- **FS-122 · Shared player assets — COMPILED + PIE_TESTED.** Retargeted Fantasy Pack locomotion, hit and defeat clips and the shared S/M LandingRoll. Imported and connected eight supplied icons, added altar previews and shared feedback. All 34 class cases passed. Full aim layers, shield recoil, distinct stone impact VFX, device glyph artwork and packaged input, audio and hardware vibration checks remain open.
+- **FS-123 · Jump phases, defeat, roll and footsteps — COMPILED + PIE_TESTED.** Confirmed the three Fantasy Pack jump phase clips. The defeated pawn keeps its final pose and rejects movement until return. The shared S/M roll travels up to 340 cm over 0.90 s using the clip's displacement curve with full-duration immunity. Imported and assigned the supplied Guild and Dungeon steps. Packaged and in-game audio mix checks are pending.
+- **FS-124 · Gerald issues Guild contracts — COMPILED + PIE_TESTED.** Gerald introduces the Guild once, then offers the contract after the player's first essence choice. Removed the board mesh and world label. A scripted expedition verified acceptance, portal activation, reward, return and a repeat contract.
+- **FS-125 · Responsive HUD and altar controls — COMPILED + PIE_TESTED.** Scaled the HUD and enlarged icons and button labels. Verified viewport input and rendered layout at 640 × 360, 1280 × 720 and 1920 × 1080. Confirmed the altar locks movement until selection closes. Packaged testing is pending.
+- **FS-126 · Footstep pitch variation — COMPILED.** Randomized each Guild and Dungeon footstep between 0.94× and 1.06× pitch, with at least 0.025 difference between successive multipliers. In-game listening remains pending.
+- **FS-127 · Shared footstep Sound Cue — COMPILED + PIE_TESTED.** Both maps use `SC_Footstep` with the existing pitch variation. The audio mixer reported active cue voices and tile samples in each map.
+- **FS-128 · Shared jump and planted basic attacks — COMPILED + PIE_TESTED.** All 12 classes completed the shared jump cycle. Axe, sword and Spark held position during their basic attacks and resumed movement afterwards. Hit, miss and blocked projectile cases passed.
+- **FS-129 · Authored player leg motion — COMPILED + PIE_TESTED.** Removed the post-slot foot placement pass from the shared player AnimBP. Verified the three Fantasy Pack jump clips and sampled foot motion for all 12 classes.
 
 ## Stage 0 — Audit
 

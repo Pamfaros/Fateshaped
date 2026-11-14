@@ -75,7 +75,7 @@ A possible mythology: Vitality, Stamina, and Mana are three manifestations of a 
 
 ### 2.2. The Guild as Home
 
-A warm interior of wood and stone with inviting lighting, shelving, a quest board, a reception desk, a regional map, tables, and the insignia of magical essences. A few locked doors can hint at a forge, an enchanting room, and other future facilities. Decorative objects must not falsely imply that their functionality is already implemented.
+A warm interior of wood and stone with inviting lighting, shelving, Gerald's reception desk, a regional map, tables, and the insignia of magical essences. A few locked doors can hint at a forge, an enchanting room, and other future facilities. Decorative objects must not falsely imply that their functionality is already implemented.
 
 ### 2.3. The Dungeon as Contrast
 
@@ -106,7 +106,7 @@ Launch game
    └─ Existing save → Guild → Restore character → Fairy at reception
    │
    ▼
-Reception / Quest Board → Accept quest → Activate portal
+Gerald at reception → Accept quest → Activate portal
    │
    ▼
 Travel to a separate quest level (Dungeon)
@@ -148,7 +148,7 @@ The selection interface explains each essence in one sentence and communicates t
 
 ### 4.4. The First Quest
 
-The fairy or quest board offers `The Forgotten Crypt`. The player accepts it, the portal activates, and the hero travels to `L_Dungeon_01`. A simple visual cue must make it obvious that the quest is active and the portal is available.
+Gerald offers `The Forgotten Crypt` at reception after the introduction and first essence selection. Interact with Gerald to accept the contract. The portal activates, and the hero travels to `L_Dungeon_01`. A simple visual cue must make it obvious that the quest is active and the portal is available.
 
 ## 5. Subsequent Launches
 
@@ -164,7 +164,7 @@ If a save is corrupted or has an incompatible version, never silently overwrite 
 
 | Map | Purpose | Jam |
 |---|---|---|
-| `L_Guild` | Persistent hub: reception, fairy, quest board, portal, progression, menus | **P0** |
+| `L_Guild` | Persistent hub: Gerald's reception and contracts, portal, progression, menus | **P0** |
 | `L_Dungeon_01` | First quest: exploration, combat, final objective | **P0** |
 | `L_CombatTest` | Development-only arena for testing gameplay, not necessarily part of the release | **Development only** |
 | Additional `L_Dungeon_*`, biomes, town, outskirts | Expanded world and content | **POST-JAM** |
@@ -178,7 +178,7 @@ The portal is functional, not just decorative: it activates only after a quest i
 | Object | Minimum behavior | Long-term potential |
 |---|---|---|
 | Fairy at reception | Short dialogue + offering/selecting a quest | Reputation reactions, lore, multiple quests |
-| Quest Board | Quest title, objective, reward, and acceptance | Filters, regions, difficulty, daily contracts |
+| Gerald's contracts | Quest title, objective, reward, and acceptance | Filters, regions, difficulty, daily contracts |
 | Portal | Enabled after quest acceptance; loads the map | Multiple locations, parties, routes |
 | Character Screen | Level, XP, class, V/S/M, essence history | Detailed advancement tree |
 | Essence Selection | Available only after reaching a milestone level | Branches, synergies, evolutions |

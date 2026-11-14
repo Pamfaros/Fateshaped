@@ -11,6 +11,9 @@ class AHUD;
 class APlayerController;
 class UInputComponent;
 class USpringArmComponent;
+class UTexture2D;
+class UAnimSequence;
+class USoundBase;
 
 UCLASS()
 class UFSClassCombat : public UActorComponent
@@ -86,6 +89,7 @@ private:
     void PreviousOption();
     void NextOption();
     void CloseSelection();
+    void SetSelectionOpen(bool bOpen);
     void QueueAttack();
     void QueueEvade();
     void QueueSkillOne();
@@ -98,6 +102,8 @@ private:
     void SelectEssence(TCHAR Essence);
     void SetupInput(APlayerController& Controller);
     void UpdateCamera(float DeltaTime);
+    bool IsBasicAttacking() const;
+    void SetBasicAttackMovementLock(bool bLocked);
     FVector AimDirection(bool bVertical = false) const;
     FVector MoveInput(FVector Fallback) const;
     FVector Hand() const;
@@ -108,9 +114,15 @@ private:
     void BladeContact(float From, float To, float Radius, float Damage, int32 Limit);
     void LeapContact(const FVector& Start, const FVector& Desired, float FromAge, float ToAge);
     void PlayLeapStrike();
-    float HitTarget(AActor& Target, float Damage);
+    float HitTarget(AActor& Target, float Damage, const FVector& ContactPoint);
     void Fire(FShot Shot);
     void PlaySound(const TCHAR* Name) const;
+    void PlaySharedSound(const TCHAR* Name, bool bUI = false) const;
+    void UpdateFootsteps(float DeltaTime);
+    void UpdateDefeat(float DeltaTime);
+    void PlayReaction(const TCHAR* Name, float Duration);
+    void Rumble(float Intensity, float Duration);
+    void StopRumble();
     void EquipClassVisual();
     void SetWard(const FVector& Ground);
     bool WardGround(FVector& Ground) const;
@@ -127,8 +139,18 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<AActor> Altar;
 
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UTexture2D>> SharedIcons;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UAnimSequence> DodgeSequence;
+
+    UPROPERTY(Transient)
+    TObjectPtr<USoundBase> FootstepSound;
+
     const FSEssence::FClass* Class = nullptr;
     TWeakObjectPtr<APlayerController> InputController;
+    TWeakObjectPtr<AController> AttackMovementController;
     TWeakObjectPtr<USpringArmComponent> CameraArm;
     TWeakObjectPtr<AActor> LeapContactTarget;
     TArray<FShot> Shots;
@@ -168,6 +190,15 @@ private:
     bool bWasInsideWard = false;
     bool bHadTurnCue = false;
     bool bJumpForwarded = false;
+    bool bPlayedDefeat = false;
+    bool bWasGrounded = false;
+    float FootstepDistance = 0;
+    float LastFootstepPitch = 1.0f;
+    float LastAirSpeed = 0;
+    float DefeatAge = 0;
+    float DefeatDuration = 0;
+    double LastReadyCue = 0;
+    uint64 RumbleHandle = 0;
     uint8 RequestedInputs = 0;
     FVector Heading = FVector::ForwardVector;
     FVector TravelHeading = FVector::ZeroVector;
