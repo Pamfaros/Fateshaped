@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-114 drives enemy hitboxes from the animation timeline. Windows RC11 passes startup. **Next P0:** play a full RC11 expedition with normal controls and verify combat readability and reward persistence. See DEVLOG for the exact verification scope.
+**Current task** — FS-115 integrates the twelve essence paths with the Guild altar, profile and class combat. Windows RC12 passes startup. **Next P0:** play a normal-input RC12 expedition, then verify combat boundaries and the empty-room checks for each path. See DEVLOG for the verification scope.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -62,6 +62,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-112 · Crypt enemies and Warden — COMPILED + PIE_TESTED.** A seeded finite bag supplies up to four optional foes alongside the guardian and boss. Combat runs an Unreal Behavior Tree with attack, defensive, positioning and leash branches. The Warden must fall before the exit opens. Scripted PIE verified a normal melee hit, telegraphed boss damage, a frontal block, quest completion and XP. NVIDIA ACE availability and manual tuning are recorded in DEVLOG.
 - **FS-113 · Enemy hit timing and group positioning — COMPILED + PIE_TESTED.** Damage resolves when the attack clip reaches its contact pose. The Warden advances during the lunge. Vanguard holds the front while Skirmishers seek separate angles. Scripted PIE observed three attackers from different directions in one room and up to two concurrent windups.
 - **FS-114 · Animation-driven attack hitboxes — COMPILED + PIE_TESTED + PACKAGED_TESTED (startup).** Attack clips and warnings start together. Clips keep their per-attack playback rate. Damage requires capsule contact during the animation's active window, at most once per attack. Scripted PIE checked hits, misses, and a timed dodge.
+- **FS-115 · Ordered essence classes — COMPILED + PIE_TESTED (path and action smoke) + PACKAGED_TESTED (startup).** The altar and class component enable all twelve paths. Scripted PIE checked selections, stable IDs, profile writes, class caps and signature action activation. It also checked a legacy Spellsword copy and a Mage contract, reward and return. Complete per-action geometry, cancellation, real device input and the 45-second feel checks remain NOT_TESTED. Shared montage and sound placeholders need class-specific contact poses, shield brace and advance animations, an aim stance, and readable projectile, seal, thread and Stonebreak effects. Preserve RC11 as the pre-class Windows checkpoint.
 - **P1 — TODO.** Fairy dialogue polish and manual visual and audio review.
 
 ## Stage 0 — Audit

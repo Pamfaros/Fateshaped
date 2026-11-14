@@ -27,6 +27,8 @@ public:
     bool TryBehavior(EFSCryptBranch Branch);
     int32 GetExperienceReward() const { return CombatRole == EFSCryptRole::Warden ? 60 : 20; }
     bool IsDefeated() const { return bDead; }
+    float GetHealth() const { return Health; }
+    bool IsCurrentAttackBlockable() const;
 
     virtual float TakeDamage(float Damage, const FDamageEvent& Event, AController* DamageInstigator, AActor* Causer) override;
 

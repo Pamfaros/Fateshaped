@@ -40,4 +40,7 @@ public:
     UFUNCTION(BlueprintCallable, Category="Fateshaped|Character")
     static bool CastArcaneWave(ACharacter* Character, TSubclassOf<AActor> EnemyClass, TSubclassOf<AActor> WaveEffect,
         TSubclassOf<AActor> HitEffect, float Damage);
+
+    static bool CastDirectedArcaneWave(ACharacter* Character, TSubclassOf<AActor> EnemyClass, TSubclassOf<AActor> WaveEffect,
+        TSubclassOf<AActor> HitEffect, float Damage, const FVector& Forward);
 };

@@ -650,6 +650,11 @@ void AFSCryptEnemy::TestAttackHitbox(const FVector& From, const FVector& To, con
     UGameplayStatics::ApplyDamage(Player, Damage, GetController(), this, nullptr);
 }
 
+bool AFSCryptEnemy::IsCurrentAttackBlockable() const
+{
+    return IsAttacking() && Action != EAction::Stomp;
+}
+
 float AFSCryptEnemy::TakeDamage(float Damage, const FDamageEvent& Event, AController* DamageInstigator, AActor* Causer)
 {
     if (bDead || Damage <= 0)

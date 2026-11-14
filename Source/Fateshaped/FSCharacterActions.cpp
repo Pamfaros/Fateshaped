@@ -188,6 +188,16 @@ bool UFSCharacterActions::CastArcaneWave(ACharacter* Character, TSubclassOf<AAct
             }
         }
     }
+    return CastDirectedArcaneWave(Character, EnemyClass, WaveEffect, HitEffect, Damage, Forward);
+}
+
+bool UFSCharacterActions::CastDirectedArcaneWave(ACharacter* Character, TSubclassOf<AActor> EnemyClass,
+    TSubclassOf<AActor> WaveEffect, TSubclassOf<AActor> HitEffect, float Damage, const FVector& Forward)
+{
+    UWorld& World = *Character->GetWorld();
+    const FVector Origin = Character->GetActorLocation();
+    const FCollisionObjectQueryParams Objects = StrikeObjects();
+    const FCollisionQueryParams Params = WorldQuery(Character);
     Character->SetActorRotation(Forward.Rotation());
 
     FHitResult Obstruction;
