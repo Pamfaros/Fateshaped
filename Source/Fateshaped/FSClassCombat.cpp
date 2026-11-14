@@ -32,7 +32,14 @@ const TCHAR* SwordClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/
 const TCHAR* FollowClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02");
 const TCHAR* CastClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03.MM_Attack_03");
 const TCHAR* DashClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash.MM_Dash");
+const TCHAR* LeapClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump.MM_Jump");
+constexpr float LeapStrikeStart = 0.18f, LeapContactOpen = 0.25f, LeapContactClose = 0.43f, LeapDuration = 0.55f;
+constexpr float WardRadius = 175, WardHeight = 35, WardMaxCapacity = 42;
+constexpr float ThreadRecallRadius = 26;
+const FVector FollowShoulder(0, 55, 20);
+const FVector AimShoulder(0, 72, 27);
 const FName PracticeTag(TEXT("PracticeTarget"));
+const FName AltarTag(TEXT("EssenceAltar"));
 
 template<typename T> const T* Property(const UObject& Owner, const TCHAR* Name)
 {
@@ -45,6 +52,18 @@ void SetString(UObject& Owner, const TCHAR* Name, const FString& Value)
     {
         Field->SetPropertyValue_InContainer(&Owner, Value);
     }
+}
+
+FString ReadString(const UObject& Owner, const TCHAR* Name)
+{
+    const auto* Field = Property<FStrProperty>(Owner, Name);
+    return Field ? Field->GetPropertyValue_InContainer(&Owner) : FString();
+}
+
+int32 ReadInteger(const UObject* Owner, const TCHAR* Name)
+{
+    const auto* Field = Owner ? Property<FIntProperty>(*Owner, Name) : nullptr;
+    return Field ? Field->GetPropertyValue_InContainer(Owner) : 0;
 }
 
 bool Flag(const UObject& Owner, const TCHAR* Name)
@@ -75,6 +94,22 @@ bool IsEnemy(const AActor& Actor)
         return !Enemy->IsDefeated();
     }
     return !Actor.IsHidden() && Actor.GetClass()->GetName() == TEXT("BP_MeleeEnemy_C") && !Flag(Actor, TEXT("bDead"));
+}
+
+bool IsPracticeTarget(const AActor& Actor)
+{
+    return !Actor.IsHidden() && Actor.ActorHasTag(PracticeTag);
+}
+
+FVector BendDirection(const FVector& Aim)
+{
+    const FRotator Rotation = Aim.Rotation();
+    return FRotator(FMath::Clamp(Rotation.Pitch, -35.0, 35.0), Rotation.Yaw, 0).Vector();
+}
+
+FVector ShotEndpoint(const FVector& Position, const FVector& Direction, float Turn, float Step)
+{
+    return Position + Direction.RotateAngleAxis(Turn * Step * 0.5f, FVector::UpVector) * Step;
 }
 
 AStaticMeshActor* Marker(UWorld& World, const FVector& Position, const FVector& Scale, bool bCylinder = false)
@@ -124,12 +159,31 @@ ACharacter& UFSClassCombat::Player() const
 void UFSClassCombat::BeginPlay()
 {
     Super::BeginPlay();
+    auto* Mesh = Player().GetMesh();
+    Mesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+    AddTickPrerequisiteComponent(Mesh);
     OriginalWalkSpeed = Player().GetCharacterMovement()->MaxWalkSpeed;
     if (auto* Arm = Player().FindComponentByClass<USpringArmComponent>())
     {
+        CameraArm = Arm;
         OriginalArm = Arm->TargetArmLength;
+        OriginalSocketOffset = Arm->SocketOffset;
+        // Drive the boom from view rotation only, and apply the aim blend before its collision probe.
+        Arm->SetUsingAbsoluteRotation(true);
+        Arm->bUsePawnControlRotation = true;
+        Arm->SocketOffset += FollowShoulder;
+        Arm->AddTickPrerequisiteComponent(this);
     }
-    SpawnAltar();
+    if (IsGuild())
+    {
+        TArray<AActor*> Altars;
+        UGameplayStatics::GetAllActorsWithTag(this, AltarTag, Altars);
+        if (!Altars.IsEmpty())
+        {
+            Altar = Altars[0];
+            AltarLabel = Altar->FindComponentByClass<UTextRenderComponent>();
+        }
+    }
 }
 
 void UFSClassCombat::EndPlay(const EEndPlayReason::Type Reason)
@@ -259,6 +313,7 @@ void UFSClassCombat::PlaySound(const TCHAR* Name) const
 
 void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
 {
+    Message(FString());
     Move = Next;
     Age = 0;
     EndTime = End;
@@ -266,7 +321,7 @@ void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
     bHadTurnCue = false;
     HitActors.Reset();
     StrikePoint = FVector::ZeroVector;
-    LastBlade = FVector::ZeroVector;
+    bHaveBladeSample = false;
     SetFlag(TEXT("bAttacking"), Next != EMove::Dodge);
     SetFlag(TEXT("bDodging"), Next == EMove::Dodge);
     if (Clip)
@@ -285,11 +340,18 @@ void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
 
 void UFSClassCombat::Finish()
 {
+    if (Move == EMove::Leap)
+    {
+        auto* Movement = Player().GetCharacterMovement();
+        Movement->MaxFlySpeed = PreLeapFlySpeed;
+        if (Movement->MovementMode == MOVE_Flying) Movement->SetMovementMode(MOVE_Falling);
+    }
     Move = EMove::Idle;
     MoveTime = 0;
     MoveAge = 0;
     SetFlag(TEXT("bAttacking"), false);
     SetFlag(TEXT("bDodging"), false);
+    LeapContactTarget.Reset();
     UFSCharacterActions::EndAttackFacing(&Player());
 }
 
@@ -324,6 +386,28 @@ FVector UFSClassCombat::Hand() const
     return Player().GetMesh()->GetSocketLocation(TEXT("hand_r"));
 }
 
+void UFSClassCombat::WeaponEdge(FVector& Base, FVector& Tip) const
+{
+    if (ClassWeapon && ClassWeapon->GetStaticMesh())
+    {
+        const FTransform& Transform = ClassWeapon->GetComponentTransform();
+        // Weapon meshes have their long axis along local Z. The axe head spans local Y.
+        if (Branch() == 'V')
+        {
+            Base = Transform.TransformPosition(FVector(0, -14, 67));
+            Tip = Transform.TransformPosition(FVector(0, 14, 67));
+        }
+        else
+        {
+            Tip = Transform.TransformPosition(FVector(0, 0, 145));
+            Base = Move == EMove::PaidStand ? Tip : Transform.TransformPosition(FVector(0, 0, 42));
+        }
+        return;
+    }
+    Base = Hand();
+    Tip = Base + Player().GetActorForwardVector() * 60;
+}
+
 FVector UFSClassCombat::MoveInput(FVector Fallback) const
 {
     FVector Direction = Player().GetPendingMovementInputVector().GetSafeNormal2D();
@@ -334,18 +418,18 @@ FVector UFSClassCombat::MoveInput(FVector Fallback) const
     return Direction.IsNearlyZero() ? Fallback : Direction;
 }
 
-bool UFSClassCombat::MovePlayer(const FVector& Offset, bool bRequireFloor)
+bool UFSClassCombat::HasTravelFloor(const FVector& Target) const
 {
     FCollisionQueryParams Query(SCENE_QUERY_STAT(FSClassMove), false, &Player());
-    const FVector Target = Player().GetActorLocation() + Offset;
     FHitResult Floor;
-    if (bRequireFloor && (!GetWorld()->LineTraceSingleByObjectType(Floor, Target, Target - FVector(0, 0, 220), Walls(), Query)
-        || Floor.ImpactNormal.Z < Player().GetCharacterMovement()->GetWalkableFloorZ()
-        || (Move != EMove::Leap && Target.Z - Floor.ImpactPoint.Z > Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 48)))
-    {
-        return false;
-    }
-    FHitResult Hit;
+    return GetWorld()->LineTraceSingleByObjectType(Floor, Target, Target - FVector(0, 0, 220), Walls(), Query)
+        && Floor.ImpactNormal.Z >= Player().GetCharacterMovement()->GetWalkableFloorZ()
+        && Target.Z - Floor.ImpactPoint.Z <= Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + (Move == EMove::Leap ? 75 : 48);
+}
+
+bool UFSClassCombat::MovePlayer(const FVector& Offset, FHitResult& Hit)
+{
+    if (Move != EMove::Dodge && !HasTravelFloor(Player().GetActorLocation() + Offset)) return false;
     Player().AddActorWorldOffset(Offset, true, &Hit);
     return !Hit.bBlockingHit;
 }
@@ -383,18 +467,24 @@ void UFSClassCombat::Evade()
 {
     if (Unavailable() || bSelecting || !Branch() || !Grounded() || !Ready(Dodge)) return;
     const bool bCanCancel = Move == EMove::Idle || Move == EMove::Axe || Move == EMove::Sword || Move == EMove::ShieldHold
-        || Move == EMove::OrbHold || (Move == EMove::Orb && !bCommitted && !bStepped)
+        || ((Move == EMove::OrbHold || (Move == EMove::Orb && !bCommitted)) && !bStepped)
         || Move == EMove::StoneHold || (Move == EMove::Thread && !bCommitted)
         || (Move == EMove::Recall && !bCommitted) || (Move == EMove::Slip && Age >= 0.21f)
         || (Move == EMove::Wave && (!bCommitted || Age >= 0.29f)) || (Move == EMove::Seal && !bCommitted)
         || Move == EMove::BendHold || (Move == EMove::Bend && !bCommitted)
         || (Move == EMove::Spark && !bCommitted);
-    if (!bCanCancel || (Move == EMove::OrbHold && bStepped && MoveTime > 0) ||
-        !Spend(0, Branch() == 'S' || Class->Kit == EKit::SpellWeaver ? 25 : 0, 0)) return;
+    if (!bCanCancel || !Spend(0, Branch() == 'S' || Class->Kit == EKit::SpellWeaver ? 25 : 0, 0)) return;
     const bool bBackstep = Branch() == 'V';
     const FVector Direction = MoveInput(bBackstep ? -Player().GetActorForwardVector() : AimDirection());
     Cancel();
-    Player().SetActorRotation(Direction.Rotation());
+    if (bBackstep)
+    {
+        Player().GetCharacterMovement()->bOrientRotationToMovement = false;
+    }
+    else
+    {
+        Player().SetActorRotation(Direction.Rotation());
+    }
     Start(EMove::Dodge, bBackstep ? 0.30f : SharedDodgeTime, DashClip);
     Travel(Direction, SharedDodgeDistance * (bBackstep ? 0.60f : 1.0f), EndTime - 0.001f);
     Cooldown[Dodge] = GetWorld()->GetTimeSeconds() + (bBackstep ? 0.80 : Branch() == 'M' ? 1.0 : EndTime);
@@ -408,8 +498,16 @@ void UFSClassCombat::SkillOne()
     if (Branch() == 'V' && (Move == EMove::Idle || (Move == EMove::Axe && Age >= 0.42f)) && Spend(15, 0, 0))
     {
         Heading = Player().GetActorForwardVector().GetSafeNormal2D();
-        Start(EMove::Leap, 0.55f, AxeClip);
-        Travel(Heading, 320, 0.55f, 55);
+        UFSCharacterActions::BeginAttackFacing(&Player());
+        Player().SetActorRotation(Heading.Rotation());
+        Start(EMove::Leap, LeapDuration, LeapClip);
+        Travel(Heading, 320, LeapDuration, 55);
+        auto* Movement = Player().GetCharacterMovement();
+        PreLeapFlySpeed = Movement->MaxFlySpeed;
+        Movement->MaxFlySpeed = 0;
+        Movement->SetMovementMode(MOVE_Flying);
+        LeapContactTarget.Reset();
+        bLeapStrikeStarted = false;
         Cooldown[First] = Now + 3;
         PlaySound(TEXT("SFX_Swing"));
     }
@@ -526,7 +624,7 @@ void UFSClassCombat::SkillTwo()
             FVector Ground;
             if (!WardGround(Ground)) { Message(TEXT("Choose clear ground for the seal")); break; }
             if (!CanPay(0, 0, 18)) { Message(TEXT("Not enough Mana")); break; }
-            WardCenter = Ground;
+            PendingWardCenter = Ground;
             Start(EMove::Seal, 0.40f, CastClip);
         }
         break;
@@ -537,7 +635,8 @@ void UFSClassCombat::SkillTwo()
             FHitResult Hit;
             FCollisionQueryParams Query(SCENE_QUERY_STAT(FSWeaveStep), false, &Player());
             auto* Capsule = Player().GetCapsuleComponent();
-            if (GetWorld()->SweepSingleByChannel(Hit, Player().GetActorLocation(), Player().GetActorLocation() + Direction * 30,
+            if (!HasTravelFloor(Player().GetActorLocation() + Direction * 30)
+                || GetWorld()->SweepSingleByChannel(Hit, Player().GetActorLocation(), Player().GetActorLocation() + Direction * 30,
                 FQuat::Identity, Capsule->GetCollisionObjectType(), Capsule->GetCollisionShape(), Query,
                 FCollisionResponseParams(Capsule->GetCollisionResponseToChannels())))
             {
@@ -580,8 +679,9 @@ void UFSClassCombat::ReleaseSkillTwo()
     }
     else if (Move == EMove::BendHold)
     {
-        Heading = AimDirection(true);
-        Heading = FRotator(FMath::Clamp(Heading.Rotation().Pitch, -35.0, 35.0), Heading.Rotation().Yaw, 0).Vector();
+        Heading = BendDirection(AimDirection(true));
+        // Freeze the previewed emitter relative to the caster. The cast pose does not steer the shot.
+        BendOffset = Hand() - Player().GetActorLocation();
         Start(EMove::Bend, 0.32f, CastClip);
     }
 }
@@ -611,35 +711,107 @@ float UFSClassCombat::HitTarget(AActor& Target, float Damage)
 
 void UFSClassCombat::BladeContact(float From, float To, float Radius, float Damage, int32 Limit)
 {
-    const FVector Current = StrikePoint.IsNearlyZero()
-        ? Hand() + Player().GetActorForwardVector() * (Branch() == 'V' ? 65 : 52) : StrikePoint;
-    const FVector Previous = LastBlade.IsNearlyZero() ? Current : LastBlade;
-    LastBlade = Current;
+    FVector BladeStart = StrikePoint, BladeEnd = StrikePoint;
+    if (StrikePoint.IsNearlyZero()) WeaponEdge(BladeStart, BladeEnd);
+    const FVector PriorStart = bHaveBladeSample ? LastBladeStart : BladeStart;
+    const FVector PriorEnd = bHaveBladeSample ? LastBladeEnd : BladeEnd;
+    LastBladeStart = BladeStart;
+    LastBladeEnd = BladeEnd;
+    bHaveBladeSample = true;
     if (Age < From || PreviousAge > To || HitActors.Num() >= Limit) return;
     const float Span = FMath::Max(KINDA_SMALL_NUMBER, Age - PreviousAge);
-    const FVector Start = FMath::Lerp(Previous, Current, FMath::Clamp((From - PreviousAge) / Span, 0.0f, 1.0f));
-    const FVector End = FMath::Lerp(Previous, Current, FMath::Clamp((To - PreviousAge) / Span, 0.0f, 1.0f));
+    const float Begin = FMath::Clamp((From - PreviousAge) / Span, 0.0f, 1.0f);
+    const float End = FMath::Clamp((To - PreviousAge) / Span, 0.0f, 1.0f);
+    const FVector BaseFrom = FMath::Lerp(PriorStart, BladeStart, Begin);
+    const FVector TipFrom = FMath::Lerp(PriorEnd, BladeEnd, Begin);
+    const FVector BaseTo = FMath::Lerp(PriorStart, BladeStart, End);
+    const FVector TipTo = FMath::Lerp(PriorEnd, BladeEnd, End);
+    const int32 Segments = FMath::Max(1, FMath::CeilToInt(FMath::Max(FVector::Distance(BaseFrom, TipFrom), FVector::Distance(BaseTo, TipTo)) / Radius));
     for (TActorIterator<AActor> It(GetWorld()); It && HitActors.Num() < Limit; ++It)
     {
         AActor* Target = *It;
-        if (HitActors.Contains(Target) || !(IsEnemy(*Target) || Target->ActorHasTag(PracticeTag))
+        if (HitActors.Contains(Target) || !(IsEnemy(*Target) || IsPracticeTarget(*Target))
             || !UFSCharacterActions::HasClearStrike(&Player(), Target)) continue;
         const auto* Capsule = Target->FindComponentByClass<UCapsuleComponent>();
         const FVector Center = Target->GetActorLocation();
         const double TargetRadius = Capsule ? Capsule->GetScaledCapsuleRadius() : 33;
         const FVector Vertical = Capsule ? FVector(0, 0, Capsule->GetScaledCapsuleHalfHeight() - TargetRadius) : FVector::ZeroVector;
-        FVector Strike, Body;
-        FMath::SegmentDistToSegmentSafe(Start, End, Center - Vertical, Center + Vertical, Strike, Body);
-        if (FVector::DistSquared(Strike, Body) <= FMath::Square(Radius + TargetRadius))
+        for (int32 Index = 0; Index <= Segments; ++Index)
         {
-            HitActors.Add(Target);
-            const float Actual = HitTarget(*Target, Damage);
-            if (Move == EMove::Leap && !Target->ActorHasTag(PracticeTag))
+            const float AlongBlade = static_cast<float>(Index) / Segments;
+            FVector Strike, Body;
+            FMath::SegmentDistToSegmentSafe(FMath::Lerp(BaseFrom, TipFrom, AlongBlade), FMath::Lerp(BaseTo, TipTo, AlongBlade),
+                Center - Vertical, Center + Vertical, Strike, Body);
+            if (FVector::DistSquared(Strike, Body) <= FMath::Square(Radius + TargetRadius))
             {
-                MoveTime = 0;
-                if (!IsGuild()) SetValue(TEXT("Health"), FMath::Min(Value(TEXT("MaxHealth")), Value(TEXT("Health")) + Actual * 0.5f));
+                HitActors.Add(Target);
+                HitTarget(*Target, Damage);
+                break;
             }
         }
+    }
+}
+
+void UFSClassCombat::LeapContact(const FVector& Start, const FVector& Desired, float FromAge, float ToAge)
+{
+    if (bCommitted || ToAge < LeapContactOpen || FromAge >= LeapContactClose || ToAge <= FromAge) return;
+    const FVector A = FMath::Lerp(Start, Desired, FMath::Clamp((LeapContactOpen - FromAge) / (ToAge - FromAge), 0.0f, 1.0f));
+    const FVector B = FMath::Lerp(Start, Desired, FMath::Clamp((LeapContactClose - FromAge) / (ToAge - FromAge), 0.0f, 1.0f));
+    const auto* Capsule = Player().GetCapsuleComponent();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(FSFuryLeap), false, &Player());
+    FCollisionObjectQueryParams Pawns(ECC_Pawn);
+    TArray<FHitResult> Contacts;
+    GetWorld()->SweepMultiByObjectType(Contacts, A, B + Heading * 50, FQuat::Identity, Pawns, Capsule->GetCollisionShape(), Query);
+    TArray<AActor*> Candidates;
+    for (const FHitResult& Contact : Contacts)
+    {
+        AActor* Target = Contact.GetActor();
+        if (IsValid(Target) && (IsEnemy(*Target) || IsPracticeTarget(*Target))) Candidates.AddUnique(Target);
+    }
+    if (IsGuild())
+    {
+        TArray<AActor*> Dummies;
+        UGameplayStatics::GetAllActorsWithTag(this, PracticeTag, Dummies);
+        for (AActor* Dummy : Dummies)
+        {
+            if (!IsPracticeTarget(*Dummy) || Candidates.Contains(Dummy)) continue;
+            const FVector Center = Dummy->GetActorLocation();
+            FVector Sweep, Body;
+            const double CylinderHeight = Capsule->GetScaledCapsuleHalfHeight() - Capsule->GetScaledCapsuleRadius();
+            const FVector Height(0, 0, CylinderHeight);
+            FMath::SegmentDistToSegmentSafe(A, B + Heading * 50, Center - Height, Center + Height, Sweep, Body);
+            if (FVector::DistSquared(Sweep, Body) <= FMath::Square(Capsule->GetScaledCapsuleRadius() + 30.0))
+            {
+                Candidates.Add(Dummy);
+            }
+        }
+    }
+    for (AActor* Target : Candidates)
+    {
+        if (!UFSCharacterActions::HasClearStrike(&Player(), Target)) continue;
+        if (LeapContactTarget.IsValid() && Target != LeapContactTarget.Get()) continue;
+        if (FVector::DotProduct((Target->GetActorLocation() - A).GetSafeNormal2D(), Heading) <= 0) continue;
+        bCommitted = true;
+        if (!IsPracticeTarget(*Target)) MoveTime = 0;
+        PlaySound(TEXT("SFX_Hit"));
+        const float Actual = HitTarget(*Target, 40.8f);
+        if (!IsGuild() && Actual > 0)
+        {
+            const float Before = Value(TEXT("Health"));
+            const float After = FMath::Min(Value(TEXT("MaxHealth")), Before + Actual * 0.5f);
+            SetValue(TEXT("Health"), After);
+            Message(FString::Printf(TEXT("Fury Leap  +%.1f V"), After - Before));
+        }
+        break;
+    }
+}
+
+void UFSClassCombat::PlayLeapStrike()
+{
+    bLeapStrikeStarted = true;
+    if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, FollowClip))
+    {
+        UFSCharacterActions::PlayActionAnimation(&Player(), Animation, Animation->GetPlayLength() / (LeapDuration - LeapStrikeStart));
     }
 }
 
@@ -650,7 +822,7 @@ void UFSClassCombat::Fire(FShot Shot)
         const FVector Origin = Player().GetActorLocation();
         FCollisionQueryParams Query(SCENE_QUERY_STAT(FSClassEmission), false, &Player());
         FHitResult Hit;
-        if (FVector::DistSquared(Shot.Position, Hand()) < 1.0
+        if (Shot.bCheckEmission
             && GetWorld()->LineTraceSingleByObjectType(Hit, Origin, Shot.Position, Walls(), Query))
         {
             PlaySound(TEXT("SFX_Hit"));
@@ -674,21 +846,22 @@ void UFSClassCombat::TickShots(float DeltaTime)
         FShot& Shot = Shots[Index];
         float Remaining = FMath::Min(Shot.Range, Shot.Speed * DeltaTime);
         bool bStop = false;
+        FHitResult Wall;
         while (Remaining > KINDA_SMALL_NUMBER && !bStop)
         {
             const float Step = FMath::Min(20.0f, Remaining);
-            const FVector MidHeading = Shot.Direction.RotateAngleAxis(Shot.TurnDegrees * Step * 0.5f, FVector::UpVector);
-            const FVector Desired = Shot.Position + MidHeading * Step;
+            const FVector Desired = ShotEndpoint(Shot.Position, Shot.Direction, Shot.TurnDegrees, Step);
             FCollisionQueryParams Query(SCENE_QUERY_STAT(FSClassShot), false, &Player());
-            FHitResult Wall;
+            // Reserve room for the return sweep even when the thread reaches maximum range beside a wall.
+            const float WallRadius = Shot.bThread ? ThreadRecallRadius + 1 : FMath::Max(1.0f, Shot.Radius);
             bStop = GetWorld()->SweepSingleByObjectType(Wall, Shot.Position, Desired, FQuat::Identity, Walls(),
-                FCollisionShape::MakeSphere(FMath::Max(1.0f, Shot.Radius)), Query);
+                FCollisionShape::MakeSphere(WallRadius), Query);
             const FVector End = bStop ? Wall.Location : Desired;
             TArray<TPair<double, AActor*>> Contacts;
             for (TActorIterator<AActor> It(GetWorld()); It && Shot.Hit.Num() < Shot.TargetLimit; ++It)
             {
                 AActor* Target = *It;
-                if (Shot.Hit.Contains(Target) || !(IsEnemy(*Target) || Target->ActorHasTag(PracticeTag))) continue;
+                if (Shot.Hit.Contains(Target) || !(IsEnemy(*Target) || IsPracticeTarget(*Target))) continue;
                 const auto* Capsule = Target->FindComponentByClass<UCapsuleComponent>();
                 const FVector Center = Target->GetActorLocation();
                 const double TargetRadius = Capsule ? Capsule->GetScaledCapsuleRadius() : 30;
@@ -730,9 +903,13 @@ void UFSClassCombat::TickShots(float DeltaTime)
         {
             if (Shot.bThread)
             {
-                Anchor = Shot.Position;
-                AnchorUntil = GetWorld()->GetTimeSeconds() + 2.5;
-                AnchorVisual = Marker(*GetWorld(), Anchor, FVector(0.28));
+                if (Wall.bStartPenetrating) PlaySound(TEXT("SFX_Hit"));
+                else
+                {
+                    Anchor = Shot.Position;
+                    AnchorUntil = GetWorld()->GetTimeSeconds() + 2.5;
+                    AnchorVisual = Marker(*GetWorld(), Anchor, FVector(0.28));
+                }
             }
             if (AActor* Visual = Shot.Visual.Get()) Visual->Destroy();
             Shots.RemoveAt(Index);
@@ -754,11 +931,27 @@ void UFSClassCombat::TickAction(float DeltaTime)
         const FVector Direction = bCurve ? FMath::Lerp(Heading, TravelHeading, (From + To) * 0.5f).GetSafeNormal2D() : TravelHeading;
         const float ArcDelta = 4 * MoveArc * (To * (1 - To) - From * (1 - From));
         if (bCurve) Player().SetActorRotation(Direction.Rotation());
-        const bool bClear = MovePlayer(Direction * MoveDistance * (To - From) + FVector(0, 0, ArcDelta), Move != EMove::Dodge);
+        const FVector StartLocation = Player().GetActorLocation();
+        const FVector Offset = Direction * MoveDistance * (To - From) + FVector(0, 0, ArcDelta);
+        FHitResult Obstruction;
+        const bool bClear = MovePlayer(Offset, Obstruction);
+        if (Move == EMove::Leap && (bClear || Obstruction.bBlockingHit))
+        {
+            const float TravelEnd = bClear ? Age : FMath::Lerp(PreviousAge, Age, Obstruction.Time);
+            if (!bClear && TravelEnd < LeapContactOpen && IsValid(Obstruction.GetActor()) && IsEnemy(*Obstruction.GetActor()))
+            {
+                LeapContactTarget = Obstruction.GetActor();
+                Player().GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+            }
+            LeapContact(StartLocation, Player().GetActorLocation(), PreviousAge, TravelEnd);
+        }
         if (!bClear || To >= 1)
         {
-            if (!bClear && Move == EMove::Leap && Age < 0.25f) bCommitted = true;
             MoveTime = 0;
+        }
+        if (Move == EMove::Leap && MoveTime <= 0 && Player().GetCharacterMovement()->MovementMode == MOVE_Flying)
+        {
+            Player().GetCharacterMovement()->SetMovementMode(MOVE_Falling);
         }
     }
 
@@ -777,11 +970,15 @@ void UFSClassCombat::TickAction(float DeltaTime)
         if (Branch() == 'V' && Age >= 0.24f) SetFlag(TEXT("bDodging"), false);
         break;
     case EMove::Leap:
-        StrikePoint = Player().GetActorLocation() + Heading * 50;
-        if (!bCommitted) BladeContact(0.25f, 0.43f, Player().GetCapsuleComponent()->GetScaledCapsuleRadius(), 40.8f, 1);
+        if (!bLeapStrikeStarted && Age >= LeapStrikeStart) PlayLeapStrike();
+        if (LeapContactTarget.IsValid() && !bCommitted)
+        {
+            const FVector Position = Player().GetActorLocation();
+            LeapContact(Position, Position, PreviousAge, Age);
+        }
         if (Age >= EndTime)
         {
-            PlaySound(TEXT("SFX_Hit"));
+            if (!bCommitted) Message(TEXT("Fury Leap missed"));
         }
         break;
     case EMove::ShieldHold:
@@ -798,7 +995,12 @@ void UFSClassCombat::TickAction(float DeltaTime)
         BladeContact(0.06f, EndTime - 0.12f, 34, 12, 1);
         break;
     case EMove::Spark:
-        if (!bCommitted && Age >= 0.10f) { bCommitted = true; Fire({Hand(), Heading, 9, 1600, 550, 12}); }
+        if (!bCommitted && Age >= 0.10f)
+        {
+            bCommitted = true;
+            Fire({Hand(), Heading, 9, 1600, 550, 12});
+            if (InsideWard()) PulseWard();
+        }
         break;
     case EMove::OrbHold:
         if (!bHadTurnCue && Age >= 0.45f) { bHadTurnCue = true; PlaySound(TEXT("SFX_Hit")); }
@@ -811,7 +1013,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
             {
                 Cooldown[First] = Now + 1.20;
                 Fire(bFull ? FShot{Hand(), Heading, 14, 1800, 1100, 32} : FShot{Hand(), Heading, 32, 900, 600, 24});
-                if (WardUntil > Now && FVector::Dist2D(Player().GetActorLocation(), WardCenter) <= 175) PlaySound(TEXT("SFX_Hit"));
+                if (InsideWard()) PulseWard();
             }
         }
         break;
@@ -833,7 +1035,9 @@ void UFSClassCombat::TickAction(float DeltaTime)
         {
             bCommitted = true;
             const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSThreadOrigin), false, &Player());
-            if (GetWorld()->LineTraceTestByObjectType(Player().GetActorLocation(), Hand(), Walls(), Query))
+            const FVector Origin = Hand();
+            if (GetWorld()->LineTraceTestByObjectType(Player().GetActorLocation(), Origin, Walls(), Query)
+                || GetWorld()->OverlapAnyTestByObjectType(Origin, FQuat::Identity, Walls(), FCollisionShape::MakeSphere(ThreadRecallRadius + 1), Query))
             {
                 Message(TEXT("Path blocked"));
                 break;
@@ -841,7 +1045,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
             if (Spend(12, 0, 18))
             {
                 Cooldown[Second] = Now + 3.5;
-                FShot Thread{Hand(), Heading, 20, 1800, 540, 16};
+                FShot Thread{Origin, Heading, 20, 1800, 540, 16};
                 Thread.TargetLimit = 3;
                 Thread.bThread = true;
                 Fire(MoveTemp(Thread));
@@ -855,8 +1059,9 @@ void UFSClassCombat::TickAction(float DeltaTime)
             if (AnchorUntil > Now)
             {
                 const FVector Delta = Player().GetActorLocation() - Anchor;
-                FShot Thread{Anchor, Delta.GetSafeNormal2D(), 26, 2200, FMath::Min(750.0, Delta.Size2D()), 28};
+                FShot Thread{Anchor, Delta.GetSafeNormal2D(), ThreadRecallRadius, 2200, FMath::Min(750.0, Delta.Size2D()), 28};
                 Thread.TargetLimit = 3;
+                Thread.bCheckEmission = false;
                 Fire(MoveTemp(Thread));
                 AnchorUntil = 0;
                 if (AActor* Visual = AnchorVisual.Get()) Visual->Destroy();
@@ -887,12 +1092,15 @@ void UFSClassCombat::TickAction(float DeltaTime)
         if (!bCommitted && Age >= 0.18f)
         {
             bCommitted = true;
-            const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSWardCommit), false, &Player());
-            if (!GetWorld()->LineTraceTestByObjectType(Player().GetActorLocation(), WardCenter + FVector(0, 0, 5), Walls(), Query)
-                && Spend(0, 0, 18))
+            FVector Ground;
+            if (!FindWardFloor(PendingWardCenter, Ground) || FMath::Abs(Ground.Z - PendingWardCenter.Z) > 3)
+            {
+                Message(TEXT("Choose clear ground for the seal"));
+            }
+            else if (Spend(0, 0, 18))
             {
                 Cooldown[Second] = Now + 4.5;
-                SetWard(WardCenter);
+                SetWard(Ground);
             }
         }
         break;
@@ -916,7 +1124,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
             if (Spend(0, 0, 22))
             {
                 Cooldown[Second] = Now + 1.40;
-                FShot Shot{Hand(), Heading, 18, 1450, 900, 28};
+                FShot Shot{Player().GetActorLocation() + BendOffset, Heading, 18, 1450, 900, 28};
                 Shot.TurnDegrees = CurveSide * 70.0f / 900.0f;
                 Fire(MoveTemp(Shot));
             }
@@ -943,6 +1151,8 @@ void UFSClassCombat::ClearEffects()
     AnchorVisual.Reset();
     WardVisual.Reset();
     AnchorUntil = WardUntil = 0;
+    WardPulseUntil = 0;
+    bWasInsideWard = false;
 }
 
 void UFSClassCombat::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* TickFunction)
@@ -963,6 +1173,11 @@ void UFSClassCombat::TickComponent(float DeltaTime, ELevelTick TickType, FActorC
     }
 
     const double Now = GetWorld()->GetTimeSeconds();
+    if (auto* Label = AltarLabel.Get(); Label && InputController.IsValid() && InputController->PlayerCameraManager)
+    {
+        const FVector ToCamera = InputController->PlayerCameraManager->GetCameraLocation() - Label->GetComponentLocation();
+        Label->SetWorldRotation(ToCamera.GetSafeNormal2D().Rotation());
+    }
     if (AnchorUntil && Now >= AnchorUntil)
     {
         if (AActor* Visual = AnchorVisual.Get()) Visual->Destroy();
@@ -975,6 +1190,9 @@ void UFSClassCombat::TickComponent(float DeltaTime, ELevelTick TickType, FActorC
         WardVisual.Reset();
         WardUntil = 0;
     }
+    const bool bInsideWard = InsideWard();
+    if (bInsideWard != bWasInsideWard && WardUntil > Now) PulseWard();
+    bWasInsideWard = bInsideWard;
     if (AnchorUntil > Now)
     {
         if (AActor* Visual = AnchorVisual.Get()) Visual->SetActorScale3D(FVector(0.20 + 0.08 * FMath::Sin(Now * (AnchorUntil - Now < 0.65 ? 20 : 8))));
@@ -1011,13 +1229,12 @@ float UFSClassCombat::GuardDamage(float Damage, AActor* Causer)
         else if (Move == EMove::StoneHold && Age >= 0.12f) Damage *= 0.55f;
         else if (Move == EMove::PaidStand && Age < 0.32f && Dot >= 0.707107f) Damage *= 0.30f;
     }
-    const FVector Feet = Player().GetActorLocation() - FVector(0, 0, Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
-    if (WardUntil > GetWorld()->GetTimeSeconds() && FVector::Dist2D(Feet, WardCenter) <= 175 && FMath::Abs(Feet.Z - WardCenter.Z) <= 35)
+    if (InsideWard())
     {
         const float Absorbed = FMath::Min(Damage * 0.35f, WardCapacity);
         WardCapacity -= Absorbed;
         Damage -= Absorbed;
-        PlaySound(TEXT("SFX_Hit"));
+        PulseWard();
         if (WardCapacity <= KINDA_SMALL_NUMBER)
         {
             WardUntil = 0;
@@ -1031,16 +1248,30 @@ float UFSClassCombat::GuardDamage(float Damage, AActor* Causer)
 void UFSClassCombat::SetWard(const FVector& Ground)
 {
     if (AActor* Visual = WardVisual.Get()) Visual->Destroy();
-    WardVisual = Marker(*GetWorld(), Ground + FVector(0, 0, 3), FVector(3.5, 3.5, 0.025), true);
+    WardVisual = Marker(*GetWorld(), Ground + FVector(0, 0, 3), FVector(0.12, 0.12, 0.025), true);
     WardCenter = Ground;
     WardUntil = GetWorld()->GetTimeSeconds() + 3.2;
-    WardCapacity = 42;
+    WardCapacity = WardMaxCapacity;
+    bWasInsideWard = false;
+}
+
+bool UFSClassCombat::InsideWard() const
+{
+    const FVector Feet = Player().GetActorLocation() - FVector(0, 0, Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+    return WardUntil > GetWorld()->GetTimeSeconds()
+        && FVector::DistSquared2D(Feet, WardCenter) <= FMath::Square(WardRadius)
+        && FMath::Abs(Feet.Z - WardCenter.Z) <= WardHeight;
+}
+
+void UFSClassCombat::PulseWard()
+{
+    WardPulseUntil = GetWorld()->GetTimeSeconds() + 0.24;
+    PlaySound(TEXT("SFX_Hit"));
 }
 
 bool UFSClassCombat::WardGround(FVector& Ground) const
 {
     const FVector Origin = Player().GetActorLocation();
-    const float Feet = Origin.Z - Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
     FVector Horizontal = Origin;
     if (bAim && Player().GetController())
     {
@@ -1053,11 +1284,18 @@ bool UFSClassCombat::WardGround(FVector& Ground) const
         const FVector Point = GetWorld()->LineTraceSingleByObjectType(Aim, Eye, End, Walls(), Query) ? Aim.ImpactPoint : End;
         Horizontal += (Point - Origin).GetClampedToMaxSize2D(400);
     }
+    return FindWardFloor(Horizontal, Ground);
+}
+
+bool UFSClassCombat::FindWardFloor(const FVector& Point, FVector& Ground) const
+{
+    const FVector Origin = Player().GetActorLocation();
+    const float Feet = Origin.Z - Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
     FHitResult Hit;
     const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSWardGround), false, &Player());
-    const bool bGround = GetWorld()->LineTraceSingleByObjectType(Hit, FVector(Horizontal.X, Horizontal.Y, Feet + 102),
-        FVector(Horizontal.X, Horizontal.Y, Feet - 102), Walls(), Query);
-    Ground = Hit.ImpactPoint;
+    const bool bGround = GetWorld()->LineTraceSingleByObjectType(Hit, FVector(Point.X, Point.Y, Feet + 100),
+        FVector(Point.X, Point.Y, Feet - 100), Walls(), Query);
+    Ground = bGround ? Hit.ImpactPoint : FVector(Point.X, Point.Y, Feet);
     return bGround && Hit.ImpactNormal.Z >= Player().GetCharacterMovement()->GetWalkableFloorZ()
         && !GetWorld()->LineTraceTestByObjectType(Origin, Ground + FVector(0, 0, 5), Walls(), Query);
 }
@@ -1071,32 +1309,26 @@ void UFSClassCombat::EndAim() { bAim = false; }
 
 void UFSClassCombat::UpdateCamera(float DeltaTime)
 {
-    if (auto* Arm = Player().FindComponentByClass<USpringArmComponent>())
+    if (auto* Arm = CameraArm.Get())
     {
-        Arm->TargetArmLength = FMath::FInterpTo(Arm->TargetArmLength, bAim ? OriginalArm * 0.72f : OriginalArm, DeltaTime, 14);
+        CameraAimBlend = FMath::Lerp(CameraAimBlend, bAim ? 1.0f : 0.0f, 1 - FMath::Exp(-13 * DeltaTime));
+        Arm->TargetArmLength = OriginalArm * FMath::Lerp(1.0f, 0.72f, CameraAimBlend);
+        Arm->SocketOffset = OriginalSocketOffset + FMath::Lerp(FollowShoulder, AimShoulder, CameraAimBlend);
     }
     float Scale = bAim ? 0.70f : 1.0f;
     if (Move == EMove::ShieldHold || Move == EMove::BendHold) Scale = FMath::Min(Scale, 0.55f);
     if (Move == EMove::OrbHold) Scale = FMath::Min(Scale, 0.60f);
     if (MoveTime > 0 || Move == EMove::StoneHold || Move == EMove::PaidStand || bSelecting) Scale = 0;
-    Player().GetCharacterMovement()->MaxWalkSpeed = OriginalWalkSpeed * Scale;
-}
-
-void UFSClassCombat::SpawnAltar()
-{
-    if (!IsGuild()) return;
-    // The current Guild map has reception and a contract board. Place the altar in its open west aisle.
-    Altar = Marker(*GetWorld(), FVector(-220, -40, 15), FVector(0.9, 0.9, 0.35), true);
-    if (!Altar) return;
-    Altar->Tags.Add(TEXT("EssenceAltar"));
-    auto* Label = NewObject<UTextRenderComponent>(Altar);
-    Label->SetupAttachment(Altar->GetRootComponent());
-    Label->SetAbsolute(false, false, true);
-    Label->SetRelativeLocation(FVector(0, 0, 190));
-    Label->SetWorldSize(20);
-    Label->SetHorizontalAlignment(EHTA_Center);
-    Label->SetText(FText::FromString(TEXT("Essence Altar")));
-    Label->RegisterComponent();
+    auto* Movement = Player().GetCharacterMovement();
+    Movement->MaxWalkSpeed = OriginalWalkSpeed * Scale;
+    const bool bWantsAimFacing = bAim && Move == EMove::Idle;
+    if (bWantsAimFacing != bAimFacing)
+    {
+        bAimFacing = bWantsAimFacing;
+        Movement->bUseControllerDesiredRotation = bAimFacing;
+        Movement->bOrientRotationToMovement = !bAimFacing && Move == EMove::Idle;
+    }
+    if (Move == EMove::Idle) Movement->bOrientRotationToMovement = !bAimFacing;
 }
 
 void UFSClassCombat::EquipClassVisual()
@@ -1116,6 +1348,9 @@ void UFSClassCombat::EquipClassVisual()
     const TCHAR* Weapon = Branch() == 'V' ? TEXT("/Game/Fantasy_Pack/Characters/Viking_Ulf/Mesh/SM_Viking_Axe.SM_Viking_Axe")
         : Branch() == 'S' ? TEXT("/Game/Fantasy_Pack/Characters/Warrior/Mesh/SM_Sword.SM_Sword") : nullptr;
     Equip(ClassWeapon, Weapon, TEXT("hand_r"));
+    ClassWeapon->SetRelativeRotation(FRotator(90, 0, 0));
+    ClassWeapon->SetRelativeLocation(FVector(Branch() == 'V' ? -16 : -14, 0, 0));
+    ClassWeapon->SetRelativeScale3D(FVector(Branch() == 'V' ? 1.25 : 0.78));
     Equip(ClassShield, Branch() == 'S' ? TEXT("/Engine/BasicShapes/Cylinder.Cylinder") : nullptr, TEXT("lowerarm_l"));
     ClassShield->SetRelativeScale3D(FVector(0.52, 0.52, 0.065));
     ClassShield->SetRelativeRotation(FRotator(90, 0, 0));
@@ -1169,6 +1404,18 @@ void UFSClassCombat::QueueSkillTwo() { RequestedInputs |= 1 << 3; }
 void UFSClassCombat::QueueFirstRelease() { RequestedInputs |= 1 << 4; }
 void UFSClassCombat::QueueSecondRelease() { RequestedInputs |= 1 << 5; }
 
+void UFSClassCombat::JumpPressed()
+{
+    bJumpForwarded = !Unavailable() && !bSelecting && (Move == EMove::Idle || Move == EMove::Dodge);
+    if (bJumpForwarded) Player().Jump();
+}
+
+void UFSClassCombat::JumpReleased()
+{
+    if (bJumpForwarded) Player().StopJumping();
+    bJumpForwarded = false;
+}
+
 void UFSClassCombat::ConsumeInput()
 {
     const uint8 Actions = RequestedInputs;
@@ -1210,6 +1457,11 @@ void UFSClassCombat::SetupInput(APlayerController& Controller)
         Bind(Key, IE_Released, &UFSClassCombat::EndAim);
     }
     for (FKey Key : {EKeys::E, EKeys::Gamepad_FaceButton_Left}) Bind(Key, IE_Pressed, &UFSClassCombat::Interaction);
+    for (FKey Key : {EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom})
+    {
+        Bind(Key, IE_Pressed, &UFSClassCombat::JumpPressed);
+        Bind(Key, IE_Released, &UFSClassCombat::JumpReleased);
+    }
     for (FKey Key : {EKeys::Left, EKeys::Gamepad_DPad_Left}) Bind(Key, IE_Pressed, &UFSClassCombat::PreviousOption, false);
     for (FKey Key : {EKeys::Right, EKeys::Gamepad_DPad_Right}) Bind(Key, IE_Pressed, &UFSClassCombat::NextOption, false);
     Bind(EKeys::BackSpace, IE_Pressed, &UFSClassCombat::CloseSelection, false);
@@ -1224,8 +1476,45 @@ void UFSClassCombat::Draw(AHUD& HUD) const
     if (!Class || !Controller) return;
     int32 Width, Height;
     Controller->GetViewportSize(Width, Height);
+    if (Width <= 0 || Height <= 0) return;
+    const double Now = GetWorld()->GetTimeSeconds();
+    const FLinearColor Panel(0.025f, 0.035f, 0.052f, 0.96f);
+    const FLinearColor Gold(1.0f, 0.85f, 0.3f);
+    const auto Text = [&](const FString& Label, FLinearColor Color, float X, float Y, float Scale, bool bCentered = false)
+    {
+        if (Label.IsEmpty()) return;
+        float TextWidth, TextHeight;
+        HUD.GetTextSize(Label, TextWidth, TextHeight, nullptr, 1.0f);
+        Scale = FMath::Min(Scale, (Width - 28.0f - (bCentered ? 0.0f : X)) / FMath::Max(1.0f, TextWidth));
+        if (bCentered) X = (Width - TextWidth * Scale) * 0.5f;
+        HUD.DrawRect(Panel, X - 6, Y - 3, TextWidth * Scale + 12, TextHeight * Scale + 6);
+        HUD.DrawText(Label, Color, X, Y, nullptr, Scale);
+    };
+    const bool bWon = Flag(Player(), TEXT("bWon"));
+    const bool bDead = Flag(Player(), TEXT("bDead"));
+    const UGameInstance* Instance = GetWorld()->GetGameInstance();
+    if (bWon || bDead)
+    {
+        const bool bPending = Instance && Flag(*Instance, TEXT("RewardPending"));
+        HUD.DrawRect(bWon ? FLinearColor(0.02f, 0.025f, 0.055f, 0.84f)
+                         : FLinearColor(0.13f, 0.02f, 0.03f, 0.84f), 0, 0, Width, Height);
+        Text(bDead ? TEXT("YOU DIED") : bPending ? TEXT("REWARD PENDING") : TEXT("CONTRACT COMPLETE"),
+            bDead ? FLinearColor(1, 0.38f, 0.3f) : Gold, 0, Height * 0.28f, 3.4f, true);
+        if (bWon)
+        {
+            Text(bPending ? TEXT("Reward save failed. Retry to keep your reward.")
+                : FString::Printf(TEXT("Saved reward: %d XP + %s"), ReadInteger(Instance, TEXT("QuestXPReward")),
+                    Instance ? *ReadString(*Instance, TEXT("QuestItemReward")) : TEXT("")),
+                FLinearColor::White, 0, Height * 0.45f, 1.5f, true);
+            if (!bPending) Text(TEXT("Gerald: 'Not bad, champ. Same time next dungeon?'"),
+                FLinearColor(0.7f, 0.9f, 1), 0, Height * 0.55f, 1.2f, true);
+        }
+        Text(bPending ? TEXT("[R] Retry reward save     [Esc] Quit (reward unsaved)")
+                      : TEXT("[R] Return to Guild     [Esc] Quit"), Gold, 0, Height * 0.70f, 1.6f, true);
+        return;
+    }
     float Y = 30.0f;
-    if (bAim && !Unavailable())
+    if (bAim && !bSelecting)
     {
         const float X = Width * 0.5f, CenterY = Height * 0.5f;
         HUD.DrawLine(X - 7, CenterY, X + 7, CenterY, FLinearColor::White);
@@ -1235,15 +1524,36 @@ void UFSClassCombat::Draw(AHUD& HUD) const
     {
         if (Max <= 0) return;
         const float Current = Value(Field);
-        HUD.DrawRect(FLinearColor(0.02, 0.02, 0.02, 0.8), 26, Y, 306, 21);
-        HUD.DrawRect(Color, 26, Y, 306 * FMath::Clamp(Current / Max, 0.0f, 1.0f), 21);
+        const float BarWidth = FMath::Min(306.0f, Width - 52.0f);
+        HUD.DrawRect(Panel, 26, Y, BarWidth, 21);
+        HUD.DrawRect(Color, 26, Y, BarWidth * FMath::Clamp(Current / Max, 0.0f, 1.0f), 21);
         HUD.DrawText(FString::Printf(TEXT("%s   %.1f / %.1f"), Label, Current, Max), FLinearColor::White, 32, Y + 1, nullptr, 1.0f);
         Y += 24;
     };
     Resource(TEXT("V"), TEXT("Health"), Class->Vitality, FLinearColor(0.78f, 0.08f, 0.10f));
     Resource(TEXT("S"), TEXT("Stamina"), Class->Stamina, FLinearColor(0.09f, 0.50f, 0.18f));
     Resource(TEXT("M"), TEXT("Mana"), Class->Mana, FLinearColor(0.10f, 0.31f, 0.80f));
-    const double Now = GetWorld()->GetTimeSeconds();
+    const USaveGame* Profile = FSEssence::Profile(Player());
+    Text(FString::Printf(TEXT("Class: %s"), Class->Name), FLinearColor::White, 30, Y + 6, 1.4f);
+    const FString History = FSEssence::History(Profile);
+    if (!History.IsEmpty()) Text(FString::Printf(TEXT("Essence: %s"), *History), FLinearColor::White, 30, Y + 30, 1.2f);
+    Text(FString::Printf(TEXT("Level: %d   Total XP: %d"), ReadInteger(Profile, TEXT("CharLevel")), ReadInteger(Profile, TEXT("XP"))),
+        FLinearColor::White, 30, Y + 52, 1.2f);
+    const FString Inventory = Profile ? ReadString(*Profile, TEXT("Inventory")) : FString();
+    if (!Inventory.IsEmpty()) Text(TEXT("Inventory: ") + Inventory, FLinearColor::White, 30, Y + 74, 1.1f);
+    const int32 Pending = FSEssence::PendingChoices(Profile);
+    if (Pending > 0) Text(FString::Printf(TEXT("Unspent essence choices: %d"), Pending), FLinearColor::White, 30, Y + 96, 1.1f);
+    Text(ReadString(Player(), TEXT("Message")), Gold, 30, Y + 121, 1.2f);
+    if (!bSelecting)
+    {
+        Text(ReadString(Player(), TEXT("Prompt")), FLinearColor::White, 0, Height - 66.0f, 1.5f, true);
+    }
+    if (const auto* Banner = Property<FNumericProperty>(Player(), TEXT("BannerUntil"));
+        Banner && Now < Banner->GetFloatingPointPropertyValue(Banner->ContainerPtrToValuePtr<void>(&Player())))
+    {
+        Text(ReadString(Player(), TEXT("BannerText")), FLinearColor(0.5f, 0.75f, 1), 0, Height * 0.17f, 2.0f, true);
+    }
+    if (Instance) Text(ReadString(*Instance, TEXT("RecoveryMessage")), Gold, 0, Height * 0.59f, 1.1f, true);
     const TCHAR* SkillOneName = Branch() == 'V' ? TEXT("Fury Leap") : Branch() == 'S' ? TEXT("Shield Advance") : TEXT("Arcane Orb");
     const TCHAR* SkillTwoName = nullptr;
     switch (Class->Kit)
@@ -1266,57 +1576,92 @@ void UFSClassCombat::Draw(AHUD& HUD) const
             const float Remaining = FMath::Max(0.0, Cooldown[Slot] - Now);
             const FString Label = Remaining > 0
                 ? FString::Printf(TEXT("%s  %s  %.1fs"), Key, Name, Remaining) : FString::Printf(TEXT("%s  %s"), Key, Name);
-            HUD.DrawText(Label, FLinearColor::White, X, Height - 122.0f, nullptr);
+            Text(Label, FLinearColor::White, X, Height - 108.0f, 1.0f);
         };
         DrawSkill(TEXT("F / LB"), SkillOneName, First, 28);
-        if (SkillTwoName) DrawSkill(TEXT("Q / RB"), SkillTwoName, Second, 235);
+        if (AnchorUntil > Now)
+        {
+            Text(FString::Printf(TEXT("Q / RB  Recall   %.1fs"), AnchorUntil - Now), Gold, 28 + FMath::Min(220.0f, Width * 0.43f),
+                Height - 108.0f, 1.0f);
+        }
+        else if (SkillTwoName) DrawSkill(TEXT("Q / RB"), SkillTwoName, Second, 28 + FMath::Min(220.0f, Width * 0.43f));
     }
-    if (WardUntil > Now) HUD.DrawText(FString::Printf(TEXT("Seal   %.1f"), WardCapacity), FLinearColor::White, 28, 105, nullptr);
-    if (AnchorUntil > Now) HUD.DrawText(FString::Printf(TEXT("Q / RB  Recall   %.1fs"), AnchorUntil - Now), FLinearColor::White, 28, 105, nullptr);
+    if (WardUntil > Now && Move != EMove::OrbHold)
+    {
+        Text(FString::Printf(TEXT("Seal  %.1f / %.1f  %s"), WardCapacity, WardMaxCapacity, InsideWard() ? TEXT("Inside") : TEXT("Outside")),
+            FLinearColor::White, 28, Height - 136.0f, 1.0f);
+    }
     if (Move == EMove::OrbHold)
     {
-        HUD.DrawText(Age >= 0.45f ? TEXT("Focused Orb") : TEXT("Broad Orb"), FLinearColor::White, 28, 105, nullptr);
+        Text(Age >= 0.45f ? TEXT("Focused Orb") : TEXT("Broad Orb"), FLinearColor::White, 28, Height - 136.0f, 1.0f);
+    }
+    if (Move == EMove::ShieldHold)
+        Text(Age >= 0.30f ? TEXT("Guard ready") : TEXT("Guard raised"), Gold, 28, Height - 136.0f, 1.0f);
+    if (Move == EMove::StoneHold)
+        Text(Age >= 0.50f ? TEXT("Stonebreak charged") : TEXT("Bracing"), Gold, 28, Height - 136.0f, 1.0f);
+    const auto Ring = [&](const FVector& Center, float Radius, FLinearColor Color, bool bDashed)
+    {
+        for (int32 Index = 0; Index < 36; Index += bDashed ? 2 : 1)
+        {
+            const FVector A = HUD.Project(Center + FVector(Radius, 0, 5).RotateAngleAxis(Index * 10, FVector::UpVector));
+            const FVector B = HUD.Project(Center + FVector(Radius, 0, 5).RotateAngleAxis((Index + 1) * 10, FVector::UpVector));
+            if (A.Z > 0 && B.Z > 0)
+            {
+                HUD.DrawLine(A.X, A.Y, B.X, B.Y, FLinearColor::Black, 5);
+                HUD.DrawLine(A.X, A.Y, B.X, B.Y, Color, 2.5f);
+            }
+        }
+    };
+    if (WardUntil > Now)
+    {
+        const bool bPulse = WardPulseUntil > Now;
+        Ring(WardCenter, WardRadius, bPulse ? FLinearColor::White : FLinearColor(0.35f, 0.85f, 1), false);
+        if (bPulse) Ring(WardCenter, WardRadius * FMath::Clamp((0.24 - (WardPulseUntil - Now)) / 0.24, 0.0, 1.0), Gold, false);
     }
     if (Class->Kit == EKit::Paladin && bAim && Move == EMove::Idle && Ready(Second))
     {
         FVector Ground;
         const bool bClear = WardGround(Ground);
-        if (bClear)
-        {
-            for (int32 Index = 0; Index < 24; ++Index)
-            {
-                const FVector A = HUD.Project(Ground + FVector(175, 0, 5).RotateAngleAxis(Index * 15, FVector::UpVector));
-                const FVector B = HUD.Project(Ground + FVector(175, 0, 5).RotateAngleAxis((Index + 1) * 15, FVector::UpVector));
-                if (A.Z > 0 && B.Z > 0) HUD.DrawLine(A.X, A.Y, B.X, B.Y, FLinearColor::White);
-            }
-        }
+        if (bClear) Ring(Ground, WardRadius, FLinearColor::White, false);
         else
         {
-            HUD.DrawText(TEXT("Seal: blocked"), FLinearColor::White, Width * 0.5f + 16, Height * 0.5f + 16, nullptr);
+            Ring(Ground, WardRadius, Gold, true);
+            Text(TEXT("Seal blocked"), Gold, Width * 0.5f + 16, Height * 0.5f + 16, 1.0f);
         }
     }
     if (Move == EMove::BendHold)
     {
         FVector Position = Hand();
-        FVector Direction = AimDirection(true);
+        FVector Direction = BendDirection(AimDirection(true));
         const float Turn = CurveSide * 70.0f / 900.0f;
         const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSBendPreview), false, &Player());
         for (int32 Index = 0; Index < 45; ++Index)
         {
-            const FVector End = Position + Direction.RotateAngleAxis(Turn * 10, FVector::UpVector) * 20;
+            const FVector End = ShotEndpoint(Position, Direction, Turn, 20);
             FHitResult Hit;
             const bool bBlocked = GetWorld()->SweepSingleByObjectType(Hit, Position, End, FQuat::Identity, Walls(), FCollisionShape::MakeSphere(18), Query);
             const FVector StartScreen = HUD.Project(Position);
             const FVector EndScreen = HUD.Project(bBlocked ? Hit.Location : End);
-            if (StartScreen.Z > 0 && EndScreen.Z > 0) HUD.DrawLine(StartScreen.X, StartScreen.Y, EndScreen.X, EndScreen.Y, FLinearColor(0.5, 0.8, 1), 2);
+            const FLinearColor Color = bBlocked ? Gold : FLinearColor(0.5f, 0.8f, 1);
+            if (StartScreen.Z > 0 && EndScreen.Z > 0)
+            {
+                HUD.DrawLine(StartScreen.X, StartScreen.Y, EndScreen.X, EndScreen.Y, FLinearColor::Black, 5);
+                HUD.DrawLine(StartScreen.X, StartScreen.Y, EndScreen.X, EndScreen.Y, Color, 2);
+                if (bBlocked || Index == 44)
+                {
+                    HUD.DrawLine(EndScreen.X - 5, EndScreen.Y - 5, EndScreen.X + 5, EndScreen.Y + 5, Color, 2);
+                    HUD.DrawLine(EndScreen.X - 5, EndScreen.Y + 5, EndScreen.X + 5, EndScreen.Y - 5, Color, 2);
+                }
+            }
             if (bBlocked) break;
             Position = End;
             Direction = Direction.RotateAngleAxis(Turn * 20, FVector::UpVector);
         }
     }
     if (!bSelecting) return;
-    const float X = Width * 0.5f - 210, Top = Height * 0.5f - 102;
-    HUD.DrawRect(FLinearColor(0.025f, 0.035f, 0.052f, 0.96f), X, Top, 420, 204);
+    const float MenuWidth = FMath::Min(420.0f, Width - 28.0f);
+    const float X = (Width - MenuWidth) * 0.5f, Top = Height * 0.5f - 102;
+    HUD.DrawRect(Panel, X, Top, MenuWidth, 204);
     HUD.DrawText(TEXT("Choose an essence"), FLinearColor::White, X + 22, Top + 14, nullptr, 1.7f);
     for (int32 Index = 0; Index < 3; ++Index)
     {
@@ -1328,8 +1673,8 @@ void UFSClassCombat::Draw(AHUD& HUD) const
         const FLinearColor Color = Index == SelectionIndex ? FLinearColor(1, 0.78f, 0.30f) : FLinearColor::White;
         HUD.DrawText(FString::Chr(TEXT("VSM")[Index]) + TEXT("  ") + Target.Name, Color, X + 27, Top + 52 + Index * 30, nullptr, 1.35f);
     }
-    HUD.DrawText(TEXT("Arrows / D-pad: choose    Interact: confirm    Backspace / View: close"), FLinearColor(0.8f, 0.85f, 0.95f),
-        X + 20, Top + 161, nullptr, 1.0);
+    Text(TEXT("Arrows / D-pad to choose    Interact to confirm"), FLinearColor(0.8f, 0.85f, 0.95f), 0, Top + 157, 1.0f, true);
+    Text(TEXT("Backspace / View to close"), FLinearColor(0.8f, 0.85f, 0.95f), 0, Top + 178, 1.0f, true);
 }
 
 void UFSClassBridge::RestoreClass(ACharacter* Character)
@@ -1350,6 +1695,7 @@ void UFSClassBridge::ClassInput(ACharacter* Character, int32 Action, bool bPress
     case 4: if (bPressed) Component->NextOption(); break;
     case 5: if (bPressed) Component->PreviousOption(); break;
     case 6: if (bPressed) Component->CloseSelection(); break;
+    case 7: if (bPressed) Component->BeginAim(); else Component->EndAim(); break;
     default: break;
     }
 }

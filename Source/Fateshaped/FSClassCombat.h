@@ -10,6 +10,7 @@ class ACharacter;
 class AHUD;
 class APlayerController;
 class UInputComponent;
+class USpringArmComponent;
 
 UCLASS()
 class UFSClassCombat : public UActorComponent
@@ -54,6 +55,7 @@ private:
         float HalfHeight = 0;
         int32 TargetLimit = 1;
         bool bThread = false;
+        bool bCheckEmission = true;
         TSet<TWeakObjectPtr<AActor>> Hit;
         TWeakObjectPtr<AActor> Visual;
     };
@@ -91,22 +93,30 @@ private:
     void QueueFirstRelease();
     void QueueSecondRelease();
     void ConsumeInput();
+    void JumpPressed();
+    void JumpReleased();
     void SelectEssence(TCHAR Essence);
     void SetupInput(APlayerController& Controller);
     void UpdateCamera(float DeltaTime);
     FVector AimDirection(bool bVertical = false) const;
     FVector MoveInput(FVector Fallback) const;
     FVector Hand() const;
-    bool MovePlayer(const FVector& Offset, bool bRequireFloor);
+    void WeaponEdge(FVector& Start, FVector& End) const;
+    bool HasTravelFloor(const FVector& Target) const;
+    bool MovePlayer(const FVector& Offset, FHitResult& Hit);
     void Travel(const FVector& Direction, float Distance, float Duration, float Arc = 0);
     void BladeContact(float From, float To, float Radius, float Damage, int32 Limit);
+    void LeapContact(const FVector& Start, const FVector& Desired, float FromAge, float ToAge);
+    void PlayLeapStrike();
     float HitTarget(AActor& Target, float Damage);
     void Fire(FShot Shot);
     void PlaySound(const TCHAR* Name) const;
-    void SpawnAltar();
     void EquipClassVisual();
     void SetWard(const FVector& Ground);
     bool WardGround(FVector& Ground) const;
+    bool FindWardFloor(const FVector& Point, FVector& Ground) const;
+    bool InsideWard() const;
+    void PulseWard();
 
     UPROPERTY(Transient)
     TObjectPtr<UInputComponent> Input;
@@ -119,15 +129,19 @@ private:
 
     const FSEssence::FClass* Class = nullptr;
     TWeakObjectPtr<APlayerController> InputController;
+    TWeakObjectPtr<USpringArmComponent> CameraArm;
+    TWeakObjectPtr<AActor> LeapContactTarget;
     TArray<FShot> Shots;
     TSet<TWeakObjectPtr<AActor>> HitActors;
     TWeakObjectPtr<AActor> WardVisual;
     TWeakObjectPtr<AActor> AnchorVisual;
+    TWeakObjectPtr<class UTextRenderComponent> AltarLabel;
     EMove Move = EMove::Idle;
     double Cooldown[4] = {};
     double LastStaminaSpend = -10;
     double AnchorUntil = 0;
     double WardUntil = 0;
+    double WardPulseUntil = 0;
     double BufferedBasicUntil = 0;
     float Age = 0;
     float PreviousAge = 0;
@@ -138,22 +152,33 @@ private:
     float MoveArc = 0;
     float WardCapacity = 0;
     float OriginalWalkSpeed = 0;
+    float PreLeapFlySpeed = 0;
     float OriginalArm = 0;
+    FVector OriginalSocketOffset = FVector::ZeroVector;
+    float CameraAimBlend = 0;
     int32 SelectionIndex = 0;
     int32 CurveSide = 0;
     bool bSelecting = false;
     bool bAim = false;
+    bool bAimFacing = false;
+    bool bLeapStrikeStarted = false;
     bool bCommitted = false;
     bool bFull = false;
     bool bStepped = false;
+    bool bWasInsideWard = false;
     bool bHadTurnCue = false;
+    bool bJumpForwarded = false;
     uint8 RequestedInputs = 0;
     FVector Heading = FVector::ForwardVector;
     FVector TravelHeading = FVector::ZeroVector;
     FVector StrikePoint = FVector::ZeroVector;
-    FVector LastBlade = FVector::ZeroVector;
+    FVector LastBladeStart = FVector::ZeroVector;
+    FVector LastBladeEnd = FVector::ZeroVector;
+    bool bHaveBladeSample = false;
     FVector Anchor = FVector::ZeroVector;
     FVector WardCenter = FVector::ZeroVector;
+    FVector PendingWardCenter = FVector::ZeroVector;
+    FVector BendOffset = FVector::ZeroVector;
 };
 
 UCLASS()
