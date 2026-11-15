@@ -526,19 +526,61 @@ void UFSClassCombat::Cancel()
     Finish();
 }
 
-FVector UFSClassCombat::AimDirection(bool bVertical) const
+FVector UFSClassCombat::AimDirection() const
+{
+    return UFSCharacterActions::CameraHeading(&Player());
+}
+
+TOptional<FVector> UFSClassCombat::ReticlePoint() const
 {
     const auto* Controller = Cast<APlayerController>(Player().GetController());
-    if (!bAim || !bVertical || !Controller || !Controller->PlayerCameraManager)
+    if (!bAim || !Controller)
     {
-        return UFSCharacterActions::CameraHeading(&Player());
+        return {};
     }
-    const FVector Camera = Controller->PlayerCameraManager->GetCameraLocation();
-    const FVector Far = Camera + Controller->PlayerCameraManager->GetCameraRotation().Vector() * 2500;
-    FHitResult AimHit;
+
+    int32 Width, Height;
+    Controller->GetViewportSize(Width, Height);
+    FVector Eye, Ray;
+    if (!Controller->DeprojectScreenPositionToWorld(Width * 0.5f, Height * 0.5f, Eye, Ray))
+    {
+        FRotator View;
+        Controller->GetPlayerViewPoint(Eye, View);
+        Ray = View.Vector();
+    }
+
+    const FVector Far = Eye + Ray * 2500;
+    FCollisionObjectQueryParams Objects = Walls();
+    Objects.AddObjectTypesToQuery(ECC_Pawn);
     const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSClassAim), false, &Player());
-    const FVector Point = GetWorld()->LineTraceSingleByChannel(AimHit, Camera, Far, ECC_Visibility, Query) ? AimHit.ImpactPoint : Far;
-    return (Point - Hand()).GetSafeNormal();
+    TArray<FHitResult> Hits;
+    GetWorld()->LineTraceMultiByObjectType(Hits, Eye, Far, Objects, Query);
+    for (const FHitResult& Hit : Hits)
+    {
+        const auto* Component = Hit.GetComponent();
+        const auto* Actor = Hit.GetActor();
+        if ((Component && Component->GetCollisionObjectType() != ECC_Pawn)
+            || (Actor && (IsEnemy(*Actor) || IsPracticeTarget(*Actor))))
+        {
+            return Hit.ImpactPoint;
+        }
+    }
+    return Far;
+}
+
+void UFSClassCombat::LockProjectileAim()
+{
+    Heading = AimDirection();
+    LockedAimPoint = ReticlePoint();
+}
+
+FVector UFSClassCombat::ProjectileDirection(const FVector& Origin, const TOptional<FVector>& Target,
+    const FVector& Fallback, bool bHorizontal)
+{
+    if (!Target.IsSet()) return Fallback;
+    FVector Offset = Target.GetValue() - Origin;
+    if (bHorizontal) Offset.Z = 0;
+    return Offset.GetSafeNormal(UE_SMALL_NUMBER, Fallback);
 }
 
 FVector UFSClassCombat::Hand() const
@@ -614,7 +656,8 @@ void UFSClassCombat::Attack()
     }
     if (Move != EMove::Idle) return;
     if (!Ready(Basic)) { Message(TEXT("Attack recovering")); return; }
-    Heading = AimDirection(Branch() == 'M');
+    if (Branch() == 'M') LockProjectileAim();
+    else Heading = AimDirection();
     UFSCharacterActions::BeginAttackFacing(&Player());
     const EMove AttackMove = Branch() == 'V' ? EMove::Axe : Branch() == 'S' ? EMove::Sword : EMove::Spark;
     Start(AttackMove, AttackMove == EMove::Axe ? 0.95f : AttackMove == EMove::Sword ? 0.52f : 0.38f,
@@ -706,7 +749,7 @@ void UFSClassCombat::ReleaseSkillOne()
     else if (Move == EMove::OrbHold)
     {
         bFull = Age >= 0.45f;
-        Heading = AimDirection(true);
+        LockProjectileAim();
         UFSCharacterActions::BeginAttackFacing(&Player());
         Start(EMove::Orb, 0.28f, CastClip);
     }
@@ -753,7 +796,7 @@ void UFSClassCombat::SkillTwo()
         if (Move == EMove::Idle || bAxeRecovery)
         {
             if (!CanPay(12, 0, 18)) { Message(TEXT("Blood Thread requires 12 Vitality and 18 Mana")); break; }
-            Heading = AimDirection(true).GetSafeNormal2D();
+            LockProjectileAim();
             Start(EMove::Thread, 0.32f, CastClip);
         }
         break;
@@ -847,9 +890,7 @@ void UFSClassCombat::ReleaseSkillTwo()
     }
     else if (Move == EMove::BendHold)
     {
-        Heading = BendDirection(AimDirection(true));
-        // Freeze the previewed emitter relative to the caster. The cast pose does not steer the shot.
-        BendOffset = Hand() - Player().GetActorLocation();
+        LockProjectileAim();
         Start(EMove::Bend, 0.32f, CastClip);
     }
 }
@@ -1200,7 +1241,8 @@ void UFSClassCombat::TickAction(float DeltaTime)
         if (!bCommitted && Age >= 0.10f)
         {
             bCommitted = true;
-            Fire({Hand(), Heading, 9, 1600, 550, 12});
+            const FVector Origin = Hand();
+            Fire({Origin, ProjectileDirection(Origin, LockedAimPoint, Heading), 9, 1600, 550, 12});
             if (InsideWard()) PulseWard();
         }
         break;
@@ -1214,7 +1256,9 @@ void UFSClassCombat::TickAction(float DeltaTime)
             if (Spend(0, 0, 20))
             {
                 Cooldown[First] = Now + 1.20;
-                Fire(bFull ? FShot{Hand(), Heading, 14, 1800, 1100, 32} : FShot{Hand(), Heading, 32, 900, 600, 24});
+                const FVector Origin = Hand();
+                const FVector Direction = ProjectileDirection(Origin, LockedAimPoint, Heading);
+                Fire(bFull ? FShot{Origin, Direction, 14, 1800, 1100, 32} : FShot{Origin, Direction, 32, 900, 600, 24});
                 if (InsideWard()) PulseWard();
             }
         }
@@ -1247,7 +1291,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
             if (Spend(12, 0, 18))
             {
                 Cooldown[Second] = Now + 3.5;
-                FShot Thread{Origin, Heading, 20, 1800, 540, 16};
+                FShot Thread{Origin, ProjectileDirection(Origin, LockedAimPoint, Heading, true), 20, 1800, 540, 16};
                 Thread.TargetLimit = 3;
                 Thread.bThread = true;
                 Fire(MoveTemp(Thread));
@@ -1326,7 +1370,9 @@ void UFSClassCombat::TickAction(float DeltaTime)
             if (Spend(0, 0, 22))
             {
                 Cooldown[Second] = Now + 1.40;
-                FShot Shot{Player().GetActorLocation() + BendOffset, Heading, 18, 1450, 900, 28};
+                const FVector Origin = Hand();
+                const FVector Direction = BendDirection(ProjectileDirection(Origin, LockedAimPoint, Heading));
+                FShot Shot{Origin, Direction, 18, 1450, 900, 28};
                 Shot.TurnDegrees = CurveSide * 70.0f / 900.0f;
                 Fire(MoveTemp(Shot));
             }
@@ -1985,7 +2031,7 @@ void UFSClassCombat::Draw(AHUD& HUD) const
     if (Move == EMove::BendHold)
     {
         FVector Position = Hand();
-        FVector Direction = BendDirection(AimDirection(true));
+        FVector Direction = BendDirection(ProjectileDirection(Position, ReticlePoint(), AimDirection()));
         const float Turn = CurveSide * 70.0f / 900.0f;
         const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSBendPreview), false, &Player());
         for (int32 Index = 0; Index < 45; ++Index)

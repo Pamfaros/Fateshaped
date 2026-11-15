@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-132 matches Fury Leap's travel limit and action duration to Backstep. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-133 corrects aimed projectile convergence from the animated hand. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -83,6 +83,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-130 · Gerald's custom fairy and hovering idle — CREATED + PIE_TESTED.** Swapped the visible mesh on the existing Gerald actor. Added a seamless 4-second idle and a wing-only translucency effect. The scripted Guild introduction, contract, portal, reward and return passed. Facial blinking is pending facial rig support. Packaged testing remains pending.
 - **FS-131 · Player combat animation tempo — COMPILED + PIE_TESTED.** Backstep travels up to 320 cm and the shared roll up to 340 cm at native playback speed. Checked all 12 evades, wall stops and seven basic-attack cases. Packaged testing remains pending.
 - **FS-132 · Fury Leap length — COMPILED + PIE_TESTED.** Fury Leap shares Backstep's 320 cm cap and 0.97 s duration. Verified all four V-first paths, hit and healing, wall stop and Vitality cost boundaries. Packaged testing remains pending.
+- **FS-133 · Aimed projectile convergence — COMPILED + PIE_TESTED.** Lock the world point under the reticle when committing to the cast and calculate launch direction from the animated hand at emission. Checked aimed Spark, both Orb variants, neutral Bend, horizontal Thread and wall occlusion. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 

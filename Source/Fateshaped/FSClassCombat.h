@@ -104,7 +104,11 @@ private:
     void UpdateCamera(float DeltaTime);
     bool IsBasicAttacking() const;
     void SetBasicAttackMovementLock(bool bLocked);
-    FVector AimDirection(bool bVertical = false) const;
+    FVector AimDirection() const;
+    TOptional<FVector> ReticlePoint() const;
+    void LockProjectileAim();
+    static FVector ProjectileDirection(const FVector& Origin, const TOptional<FVector>& Target,
+        const FVector& Fallback, bool bHorizontal = false);
     FVector MoveInput(FVector Fallback) const;
     FVector Hand() const;
     void WeaponEdge(FVector& Start, FVector& End) const;
@@ -211,7 +215,7 @@ private:
     FVector Anchor = FVector::ZeroVector;
     FVector WardCenter = FVector::ZeroVector;
     FVector PendingWardCenter = FVector::ZeroVector;
-    FVector BendOffset = FVector::ZeroVector;
+    TOptional<FVector> LockedAimPoint;
 };
 
 UCLASS()
