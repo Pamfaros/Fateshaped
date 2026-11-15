@@ -16,6 +16,29 @@ Refresh a field when its evidence changes. Read `TASKS.md` for the current task,
 
 ## Entries
 
+## 2026-11-16 · Player hand bind pose
+
+- `SKM_Quinn_Simple` kept the custom mesh, but its finger and body bind axes did not match `SKM_Manny_Simple`, so mannequin animation bent the fingers around the wrong axes. `fs.ConformPlayerHands` copied 89 bind transforms from Manny and rebuilt the inverse bind matrices. The modeled rest shape stays in place; the bone axes now match the animation source. Saved the mesh. A scene capture of the rest right hand shows a separate thumb and four fingers. An animated grip was **NOT_TESTED**.
+
+## 2026-11-16 · Revert distorted player bind pose
+
+- The Skeletal Mesh Editor preview showed severe spiking on the right forearm after the experimental `fs.ConformPlayerHands` command. Restored `SKM_Quinn_Simple.uasset` byte-for-byte from the committed custom-character model (LFS SHA-256 `4c2d37f593d33bbc9b81549a78356032cf96eba52dff67ffeb67c68eff11ce80`); its `axel_barbar`, `sword`, and `round_shield` sockets remain present. Removed the one-off C++ command and capture wrapper. This rolls back the harmful edit without replacing the user's model.
+- **NOT_TESTED:** the restored asset's idle/attack finger deformation in PIE. The editor UI was closed after confirming `All Saved`; a second editor launch was rejected by automatic review because another Unreal process could not be ruled out. Resume by inspecting the restored mesh in the existing editor, then compare its actual animation pose before editing skin weights or reference transforms. No compile was needed for the restored asset.
+
+## 2026-11-15 · FS-154 Prologue text frame
+
+- Prologue and Gerald text wrap inside a centered frame that stays at 70% of the game window width and height. The frame follows the live viewport size. **COMPILED.** Layout in PIE is **NOT_TESTED**.
+
+## 2026-11-15 · FS-154 Prologue edge buttons
+
+- The prologue and Gerald subtitles keep the narrative in the center. **Skip** sits on the left edge and **Continue** on the right. Both hide during the eyelid fade. Keyboard and gamepad advance and skip still work. **COMPILED** into `UnrealEditor-Fateshaped.dll`. Button layout in PIE is **NOT_TESTED**.
+
+## 2026-11-15 · FS-154 First-launch prologue
+
+- New profiles start from the existing Guild menu. Start Game plays five timed text screens, fades in on Gerald, then shows his seven introduction lines with a speaker name, continue, and skip. Skipping the text still plays Gerald. Skipping Gerald still requires the Essence Altar and does not accept a contract. There is no voice track and no new ambient bed.
+- `BP_FS_SaveGame` gained `PrologueCompleted`. `IntroCompleted` remains the Gerald flag. Progressed saves (essence history, XP, level above 1, completed or active quests, or an existing intro flag) do not replay the introduction. `FS_InteractInGuild` now chooses a short line for an undecided adventurer, the debt contract after a starter class, the open portal, or a return from a completed dungeon. Quest acceptance, the run id, and the portal rule are unchanged.
+- **COMPILED:** Win64 Development Editor linked `UnrealEditor-Fateshaped.dll`. Both Blueprints compiled and saved. PIE showed the startup menu in front of the Guild exit portal. The prologue screens, awakening, dialogue, skip, and a restarted save were **NOT_TESTED**. The editor was closed to link the module.
+
 ## 2026-11-15 · Startup menu over the exit portal
 
 - The startup screen no longer paints an opaque backdrop. The panel stays on the left. Before pause, the view switches to a temporary camera aimed at the Guild actor tagged or named `QuestPortal`, offset from the player’s approach so the portal sits in the open side of the frame. The pawn is hidden for that shot. Start restores the pawn, its visibility, and the play camera.

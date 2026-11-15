@@ -2199,7 +2199,9 @@ FString UFSClassBridge::GuildClassPrompt(ACharacter* Character)
     const FString History = FSEssence::History(FSEssence::Profile(*Character));
     if (FSEssence::CanChoose(*Character))
     {
-        return History.IsEmpty() ? TEXT("Choose your first essence at the Guild altar.") : TEXT("An essence choice is available at the Guild altar.");
+        return History.IsEmpty()
+            ? TEXT("Visit the Essence Altar and choose your first essence.")
+            : TEXT("An essence choice is available at the Guild altar.");
     }
     return TEXT("Guild Hall. Speak to Gerald for a contract.");
 }

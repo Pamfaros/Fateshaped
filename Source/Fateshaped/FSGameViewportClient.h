@@ -7,6 +7,7 @@ class ACameraActor;
 class APawn;
 class SFSPauseMenu;
 class SFSMainMenu;
+class UFSIntroWidget;
 
 UCLASS()
 class UFSGameViewportClient final : public UGameViewportClient
@@ -24,6 +25,8 @@ private:
     void FrameExitPortal(APlayerController& Player);
     void ClearMenuView();
     void StartGame();
+    void SavePrologue();
+    void SaveGeraldIntro();
     void CaptureMenuInput(APlayerController& Player, TSharedPtr<SWidget> InitialFocus);
     void RestoreGameInput();
     void OpenPauseMenu(APlayerController& Player);
@@ -34,6 +37,7 @@ private:
 
     TSharedPtr<SFSPauseMenu> PauseMenu;
     TSharedPtr<SFSMainMenu> MainMenu;
+    TObjectPtr<UFSIntroWidget> IntroWidget;
     TWeakObjectPtr<APlayerController> PausedPlayer;
     TWeakObjectPtr<ACameraActor> MenuCamera;
     TWeakObjectPtr<APawn> HiddenMenuPawn;

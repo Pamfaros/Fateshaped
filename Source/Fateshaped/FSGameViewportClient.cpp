@@ -1,4 +1,5 @@
 #include "FSGameViewportClient.h"
+#include "FSIntroWidget.h"
 
 #include "AudioDevice.h"
 #include "Camera/CameraActor.h"
@@ -462,6 +463,11 @@ void UFSGameViewportClient::DetachViewportClient()
 {
     SaveMasterVolume();
     ClearMenuView();
+    if (IntroWidget)
+    {
+        IntroWidget->RemoveFromParent();
+        IntroWidget = nullptr;
+    }
     PauseMenu.Reset();
     MainMenu.Reset();
     PausedPlayer.Reset();
@@ -562,11 +568,43 @@ void UFSGameViewportClient::StartGame()
     if (!MainMenu) return;
     const TSharedPtr<SFSMainMenu> ClosingMenu = MoveTemp(MainMenu);
     RemoveViewportWidgetContent(ClosingMenu.ToSharedRef());
-    if (APlayerController* Player = PausedPlayer.Get())
+    APlayerController* Player = PausedPlayer.Get();
+    ClearMenuView();
+    if (Player)
     {
+        if (UFSIntroWidget* Intro = UFSIntroWidget::TryBegin(*Player))
+        {
+            if (bPausedByMenu)
+            {
+                Player->SetPause(false);
+                bPausedByMenu = false;
+            }
+            Intro->OnPrologueComplete.BindUObject(this, &UFSGameViewportClient::SavePrologue);
+            Intro->OnDialogueComplete.BindUObject(this, &UFSGameViewportClient::SaveGeraldIntro);
+            IntroWidget = Intro;
+            return;
+        }
         if (AHUD* HUD = Player->GetHUD()) HUD->bShowHUD = bPreviousShowHUD;
     }
-    ClearMenuView();
+    RestoreGameInput();
+}
+
+void UFSGameViewportClient::SavePrologue()
+{
+    if (APlayerController* Player = PausedPlayer.Get())
+    {
+        UFSIntroWidget::CommitPrologue(*Player);
+    }
+}
+
+void UFSGameViewportClient::SaveGeraldIntro()
+{
+    if (APlayerController* Player = PausedPlayer.Get())
+    {
+        UFSIntroWidget::CommitIntroduction(*Player);
+        if (AHUD* HUD = Player->GetHUD()) HUD->bShowHUD = bPreviousShowHUD;
+    }
+    IntroWidget = nullptr;
     RestoreGameInput();
 }
 
