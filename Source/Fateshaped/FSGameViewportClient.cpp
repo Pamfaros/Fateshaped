@@ -4,9 +4,11 @@
 #include "Engine/Console.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/GameUserSettings.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/HUD.h"
 #include "InputKeyEventArgs.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/ConfigCacheIni.h"
@@ -16,6 +18,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -45,6 +48,132 @@ FText GetQualityLabel(int32 Quality)
     }
 }
 }
+
+class SFSMainMenu final : public SCompoundWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SFSMainMenu) {}
+        SLATE_EVENT(FSimpleDelegate, OnStart)
+        SLATE_EVENT(FSimpleDelegate, OnQuit)
+    SLATE_END_ARGS()
+
+    void Construct(const FArguments& Args)
+    {
+        OnStart = Args._OnStart;
+        OnQuit = Args._OnQuit;
+        TArray<FString> Entries;
+        GConfig->GetArray(TEXT("Fateshaped.Credits"), TEXT("Entries"), Entries, GGameIni);
+        FString Credits;
+        for (const FString& Entry : Entries)
+        {
+            if (!Credits.IsEmpty()) Credits += TEXT("\n\n");
+            Credits += Entry;
+        }
+        const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush("WhiteBrush");
+        ChildSlot
+        [
+            SNew(SBorder).BorderImage(WhiteBrush)
+            .BorderBackgroundColor(FLinearColor(0.009f, 0.011f, 0.014f, 1.0f))
+            .HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(24)
+            [
+                SNew(SScaleBox).Stretch(EStretch::ScaleToFit).StretchDirection(EStretchDirection::DownOnly)
+                [
+                    SNew(SBox).WidthOverride(560)
+                    [
+                        SNew(SBorder).BorderImage(WhiteBrush).BorderBackgroundColor(Gold).Padding(1)
+                        [
+                            SNew(SBorder).BorderImage(WhiteBrush).BorderBackgroundColor(Panel).Padding(36)
+                            [
+                                SNew(SVerticalBox)
+                                + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 10)
+                                [
+                                    SNew(STextBlock).Text(LOCTEXT("GameTitle", "FATESHAPED"))
+                                    .Font(FCoreStyle::GetDefaultFontStyle("Bold", 38)).ColorAndOpacity(Gold)
+                                ]
+                                + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 30)
+                                [
+                                    SNew(STextBlock).Text_Lambda([this]
+                                    {
+                                        return bCreditsOpen ? LOCTEXT("CreditsTitle", "Credits") : LOCTEXT("GameTagline", "Every choice shapes your fate.");
+                                    }).Font(FCoreStyle::GetDefaultFontStyle("Regular", 16)).ColorAndOpacity(Parchment)
+                                ]
+                                + SVerticalBox::Slot().AutoHeight()
+                                [
+                                    SNew(SVerticalBox)
+                                    .Visibility_Lambda([this] { return bCreditsOpen ? EVisibility::Collapsed : EVisibility::Visible; })
+                                    + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
+                                    [
+                                        SAssignNew(StartButton, SButton).HAlign(HAlign_Center).ContentPadding(FMargin(20, 14))
+                                        .Text(LOCTEXT("StartGame", "Start Game"))
+                                        .OnClicked_Lambda([this] { OnStart.ExecuteIfBound(); return FReply::Handled(); })
+                                    ]
+                                    + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
+                                    [
+                                        SAssignNew(CreditsButton, SButton).HAlign(HAlign_Center).ContentPadding(FMargin(20, 14))
+                                        .Text(LOCTEXT("Credits", "Credits"))
+                                        .OnClicked_Lambda([this] { return ShowCredits(true); })
+                                    ]
+                                    + SVerticalBox::Slot().AutoHeight()
+                                    [
+                                        SNew(SButton).HAlign(HAlign_Center).ContentPadding(FMargin(20, 14))
+                                        .Text(LOCTEXT("MainMenuExit", "Exit"))
+                                        .OnClicked_Lambda([this] { OnQuit.ExecuteIfBound(); return FReply::Handled(); })
+                                    ]
+                                ]
+                                + SVerticalBox::Slot().AutoHeight()
+                                [
+                                    SNew(SVerticalBox)
+                                    .Visibility_Lambda([this] { return bCreditsOpen ? EVisibility::Visible : EVisibility::Collapsed; })
+                                    + SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 24)
+                                    [
+                                        SNew(SBox).MaxDesiredHeight(320)
+                                        [
+                                            SNew(SScrollBox)
+                                            + SScrollBox::Slot().Padding(0, 0, 16, 0)
+                                            [
+                                                SNew(STextBlock).Text(FText::FromString(Credits)).WrapTextAt(430)
+                                                .Font(FCoreStyle::GetDefaultFontStyle("Regular", 18)).ColorAndOpacity(Parchment)
+                                            ]
+                                        ]
+                                    ]
+                                    + SVerticalBox::Slot().AutoHeight()
+                                    [
+                                        SAssignNew(BackButton, SButton).HAlign(HAlign_Center).ContentPadding(FMargin(20, 14))
+                                        .Text(LOCTEXT("CreditsBack", "Back"))
+                                        .OnClicked_Lambda([this] { return ShowCredits(false); })
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ];
+    }
+
+    TSharedPtr<SWidget> GetInitialFocus() const { return StartButton; }
+
+    virtual FReply OnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& Event) override
+    {
+        if (Event.GetKey() == EKeys::Escape)
+        {
+            // Escape returns from credits; only Start Game can dismiss the startup screen.
+            return bCreditsOpen && !Event.IsRepeat() ? ShowCredits(false) : FReply::Handled();
+        }
+        return SCompoundWidget::OnPreviewKeyDown(Geometry, Event);
+    }
+
+private:
+    FReply ShowCredits(bool bShow)
+    {
+        bCreditsOpen = bShow;
+        return FReply::Handled().SetUserFocus((bShow ? BackButton : CreditsButton).ToSharedRef(), EFocusCause::SetDirectly);
+    }
+
+    TSharedPtr<SButton> StartButton, CreditsButton, BackButton;
+    FSimpleDelegate OnStart, OnQuit;
+    bool bCreditsOpen = false;
+};
 
 class SFSPauseMenu final : public SCompoundWidget
 {
@@ -283,8 +412,26 @@ void UFSGameViewportClient::Init(FWorldContext& WorldContext, UGameInstance* Own
     bVolumeChanged = false;
 }
 
+void UFSGameViewportClient::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    if (!bStartupMenuShown && !IsSimulateInEditorViewport() && GameInstance && GetGameViewportWidget())
+    {
+        APlayerController* Player = GameInstance->GetFirstLocalPlayerController();
+        if (Player && Player->HasActorBegunPlay() && Player->GetPawn())
+        {
+            bStartupMenuShown = true;
+            OpenMainMenu(*Player);
+        }
+    }
+}
+
 bool UFSGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
 {
+    if (MainMenu)
+    {
+        return true;
+    }
     if (EventArgs.Key != EKeys::Escape || IsSimulateInEditorViewport() || (ViewportConsole && ViewportConsole->ConsoleActive()))
     {
         return Super::InputKey(EventArgs);
@@ -312,10 +459,38 @@ void UFSGameViewportClient::DetachViewportClient()
 {
     SaveMasterVolume();
     PauseMenu.Reset();
+    MainMenu.Reset();
+    PausedPlayer.Reset();
     Super::DetachViewportClient();
 }
 
-void UFSGameViewportClient::OpenPauseMenu(APlayerController& Player)
+void UFSGameViewportClient::OpenMainMenu(APlayerController& Player)
+{
+    MainMenu = SNew(SFSMainMenu)
+        .OnStart(FSimpleDelegate::CreateUObject(this, &UFSGameViewportClient::StartGame))
+        .OnQuit(FSimpleDelegate::CreateUObject(this, &UFSGameViewportClient::QuitGame));
+    AddViewportWidgetContent(MainMenu.ToSharedRef(), 100);
+    if (AHUD* HUD = Player.GetHUD())
+    {
+        bPreviousShowHUD = HUD->bShowHUD;
+        HUD->bShowHUD = false;
+    }
+    CaptureMenuInput(Player, MainMenu->GetInitialFocus());
+}
+
+void UFSGameViewportClient::StartGame()
+{
+    if (!MainMenu) return;
+    const TSharedPtr<SFSMainMenu> ClosingMenu = MoveTemp(MainMenu);
+    RemoveViewportWidgetContent(ClosingMenu.ToSharedRef());
+    if (APlayerController* Player = PausedPlayer.Get())
+    {
+        if (AHUD* HUD = Player->GetHUD()) HUD->bShowHUD = bPreviousShowHUD;
+    }
+    RestoreGameInput();
+}
+
+void UFSGameViewportClient::CaptureMenuInput(APlayerController& Player, TSharedPtr<SWidget> InitialFocus)
 {
     PausedPlayer = &Player;
     bPausedByMenu = !Player.IsPaused() && Player.SetPause(true);
@@ -323,6 +498,16 @@ void UFSGameViewportClient::OpenPauseMenu(APlayerController& Player)
     bPreviousIgnoreInput = IgnoreInput();
     PreviousCaptureMode = GetMouseCaptureMode();
     PreviousLockMode = GetMouseLockMode();
+
+    FInputModeUIOnly MenuInput;
+    MenuInput.SetWidgetToFocus(InitialFocus);
+    MenuInput.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    Player.SetInputMode(MenuInput);
+    Player.bShowMouseCursor = true;
+}
+
+void UFSGameViewportClient::OpenPauseMenu(APlayerController& Player)
+{
 
     PauseMenu = SNew(SFSPauseMenu)
         .InitialVolume(MasterVolume)
@@ -332,11 +517,7 @@ void UFSGameViewportClient::OpenPauseMenu(APlayerController& Player)
         .OnQuit(FSimpleDelegate::CreateUObject(this, &UFSGameViewportClient::QuitGame));
     AddViewportWidgetContent(PauseMenu.ToSharedRef(), 100);
 
-    FInputModeUIOnly MenuInput;
-    MenuInput.SetWidgetToFocus(PauseMenu->GetInitialFocus());
-    MenuInput.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-    Player.SetInputMode(MenuInput);
-    Player.bShowMouseCursor = true;
+    CaptureMenuInput(Player, PauseMenu->GetInitialFocus());
 }
 
 void UFSGameViewportClient::ClosePauseMenu()
@@ -344,7 +525,11 @@ void UFSGameViewportClient::ClosePauseMenu()
     SaveMasterVolume();
     const TSharedPtr<SFSPauseMenu> ClosingMenu = MoveTemp(PauseMenu);
     RemoveViewportWidgetContent(ClosingMenu.ToSharedRef());
+    RestoreGameInput();
+}
 
+void UFSGameViewportClient::RestoreGameInput()
+{
     if (APlayerController* Player = PausedPlayer.Get())
     {
         FInputModeGameOnly GameInput;
