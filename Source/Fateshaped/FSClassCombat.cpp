@@ -31,6 +31,7 @@ namespace
 constexpr int32 Basic = 0, Dodge = 1, First = 2, Second = 3;
 constexpr float SharedDodgeDistance = 340, BackstepDistance = 320;
 constexpr float BackstepImmunity = 0.55f, BackstepRecovery = 0.50f;
+constexpr float BackstepFallbackDuration = 0.97f;
 const TCHAR* AxeClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack");
 const TCHAR* SwordClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01");
 const TCHAR* FollowClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02");
@@ -38,7 +39,8 @@ const TCHAR* CastClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/M
 const TCHAR* DashClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash.MM_Dash");
 const TCHAR* RollClip = TEXT("/Game/Combat/SharedAnimations/AN_FS_EvadeRoll.AN_FS_EvadeRoll");
 const TCHAR* LeapClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump.MM_Jump");
-constexpr float LeapStrikeStart = 0.18f, LeapContactOpen = 0.25f, LeapContactClose = 0.43f, LeapDuration = 0.55f;
+constexpr float LeapStrikeStart = 0.18f, LeapContactOpen = 0.37f, LeapContactClose = 0.86f;
+constexpr float LeapStrikeBlendOut = 0.10f;
 constexpr float WardRadius = 175, WardHeight = 35, WardMaxCapacity = 42;
 constexpr float ThreadRecallRadius = 26;
 const FVector FollowShoulder(0, 55, 20);
@@ -641,7 +643,7 @@ void UFSClassCombat::Evade()
         Player().SetActorRotation(Direction.Rotation());
     }
     DodgeSequence = LoadObject<UAnimSequence>(nullptr, bBackstep ? DashClip : RollClip);
-    const float Duration = DodgeSequence ? DodgeSequence->GetPlayLength() : (bBackstep ? 0.97f : 0.90f);
+    const float Duration = DodgeSequence ? DodgeSequence->GetPlayLength() : (bBackstep ? BackstepFallbackDuration : 0.90f);
     Start(EMove::Dodge, Duration);
     if (DodgeSequence) UFSCharacterActions::PlayActionAnimation(&Player(), DodgeSequence, 1.0f);
     PlaySharedSound(TEXT("EvadeCloth"));
@@ -660,12 +662,14 @@ void UFSClassCombat::SkillOne()
         Heading = Player().GetActorForwardVector().GetSafeNormal2D();
         UFSCharacterActions::BeginAttackFacing(&Player());
         Player().SetActorRotation(Heading.Rotation());
-        Start(EMove::Leap, LeapDuration);
+        const auto* Backstep = LoadObject<UAnimSequence>(nullptr, DashClip);
+        const float Duration = Backstep ? Backstep->GetPlayLength() : BackstepFallbackDuration;
+        Start(EMove::Leap, Duration);
         if (auto* Takeoff = LoadObject<UAnimSequenceBase>(nullptr, LeapClip))
         {
             UFSCharacterActions::PlayActionAnimation(&Player(), Takeoff, 1.0f);
         }
-        Travel(Heading, 320, LeapDuration, 55);
+        Travel(Heading, BackstepDistance, Duration, 55);
         auto* Movement = Player().GetCharacterMovement();
         PreLeapFlySpeed = Movement->MaxFlySpeed;
         Movement->MaxFlySpeed = 0;
@@ -977,7 +981,7 @@ void UFSClassCombat::PlayLeapStrike()
     bLeapStrikeStarted = true;
     if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, FollowClip))
     {
-        PlayTimedAnimation(Animation, LeapDuration - LeapStrikeStart);
+        UFSCharacterActions::PlayActionAnimation(&Player(), Animation, 1.0f);
     }
 }
 
@@ -1166,6 +1170,13 @@ void UFSClassCombat::TickAction(float DeltaTime)
         {
             const FVector Position = Player().GetActorLocation();
             LeapContact(Position, Position, PreviousAge, Age);
+        }
+        if (PreviousAge < EndTime - LeapStrikeBlendOut && Age >= EndTime - LeapStrikeBlendOut)
+        {
+            if (auto* Instance = Player().GetMesh()->GetAnimInstance())
+            {
+                Instance->Montage_Stop(FMath::Max(0.0f, EndTime - Age));
+            }
         }
         if (Age >= EndTime)
         {
