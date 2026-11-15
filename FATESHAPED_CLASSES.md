@@ -434,7 +434,7 @@ Play at medium or long range. The focused orb rewards a steady aim at one target
 
 | Action | Input, timing and contact |
 |---|---|
-| **Arcane Spark** · `ArcaneSpark` | Attack, fix aim at cast start. **0.38 s** duration, launch at **0.10 s**, **0.65 s** cooldown. Projectile radius **9 cm**, speed **1,600 cm/s**, range **550 cm**, **12 magic damage** to its first live target. |
+| **Arcane Spark** · `ArcaneSpark` | Attack. While aiming, sample the live reticle at emission. In empty space, converge on the reticle ray at the end of the projectile's range. **0.38 s** base duration, launch at **0.10 s** on the base action timeline, **0.65 s** cooldown. Projectile radius **9 cm**, speed **1,600 cm/s**, range **550 cm**, **12 magic damage** to its first live target. |
 | **Arcane Orb** · `ArcaneOrb` | Press F on the ground with at least **20 M** and a ready cooldown. Move at **60%** speed while holding. Release to begin a **0.28 s** cast, fix aim at cast start and check M again at launch (**0.12 s** into the cast). Spend **20 M** and start **1.20 s** cooldown at that event. Auto-release once at **0.80 s** held. |
 | **Broad Orb** | Release before **0.45 s** held. Projectile radius **32 cm**, speed **900 cm/s**, range **600 cm**, **24 magic damage** to its first live target. |
 | **Focused Orb** | Release at or after **0.45 s** held. Projectile radius **14 cm**, speed **1,800 cm/s**, range **1,100 cm**, **32 magic damage** to its first live target. |

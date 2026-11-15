@@ -105,7 +105,7 @@ private:
     bool IsBasicAttacking() const;
     void SetBasicAttackMovementLock(bool bLocked);
     FVector AimDirection() const;
-    TOptional<FVector> ReticlePoint() const;
+    TOptional<FVector> ReticlePoint(const FVector& Emitter = FVector::ZeroVector, float Reach = 0) const;
     void LockProjectileAim();
     static FVector ProjectileDirection(const FVector& Origin, const TOptional<FVector>& Target,
         const FVector& Fallback, bool bHorizontal = false);
@@ -120,6 +120,7 @@ private:
     void PlayLeapStrike();
     float HitTarget(AActor& Target, float Damage, const FVector& ContactPoint);
     void Fire(FShot Shot);
+    void EmitPendingSpark(UWorld* World, ELevelTick TickType, float DeltaTime);
     void PlaySound(const TCHAR* Name) const;
     void PlaySharedSound(const TCHAR* Name, bool bUI = false) const;
     void UpdateFootsteps(float DeltaTime);
@@ -191,6 +192,7 @@ private:
     bool bAimFacing = false;
     bool bLeapStrikeStarted = false;
     bool bCommitted = false;
+    bool bSparkPending = false;
     bool bFull = false;
     bool bStepped = false;
     bool bWasInsideWard = false;

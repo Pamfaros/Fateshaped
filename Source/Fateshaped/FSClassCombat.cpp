@@ -12,6 +12,7 @@
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/Texture2D.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -30,6 +31,7 @@ namespace
 {
 constexpr int32 Basic = 0, Dodge = 1, First = 2, Second = 3;
 constexpr float SharedDodgeDistance = 340, BackstepDistance = 320;
+constexpr float SparkRange = 550;
 constexpr float BackstepImmunity = 0.55f, BackstepRecovery = 0.50f;
 constexpr float BackstepFallbackDuration = 0.97f;
 const TCHAR* AxeClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack");
@@ -184,6 +186,7 @@ ACharacter& UFSClassCombat::Player() const
 void UFSClassCombat::BeginPlay()
 {
     Super::BeginPlay();
+    FWorldDelegates::OnWorldPostActorTick.AddUObject(this, &UFSClassCombat::EmitPendingSpark);
     FootstepSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/Sounds/SC_Footstep.SC_Footstep"));
     for (const TCHAR* Name : SharedIconNames)
     {
@@ -219,6 +222,7 @@ void UFSClassCombat::BeginPlay()
 
 void UFSClassCombat::EndPlay(const EEndPlayReason::Type Reason)
 {
+    FWorldDelegates::OnWorldPostActorTick.RemoveAll(this);
     StopRumble();
     SetSelectionOpen(false);
     SetBasicAttackMovementLock(false);
@@ -516,6 +520,7 @@ void UFSClassCombat::Finish()
 
 void UFSClassCombat::Cancel()
 {
+    bSparkPending = false;
     StopRumble();
     Player().StopAnimMontage();
     if (auto* Mesh = Player().GetMesh(); Mesh && Mesh->GetAnimInstance())
@@ -531,7 +536,7 @@ FVector UFSClassCombat::AimDirection() const
     return UFSCharacterActions::CameraHeading(&Player());
 }
 
-TOptional<FVector> UFSClassCombat::ReticlePoint() const
+TOptional<FVector> UFSClassCombat::ReticlePoint(const FVector& Emitter, float Reach) const
 {
     const auto* Controller = Cast<APlayerController>(Player().GetController());
     if (!bAim || !Controller)
@@ -549,7 +554,17 @@ TOptional<FVector> UFSClassCombat::ReticlePoint() const
         Ray = View.Vector();
     }
 
-    const FVector Far = Eye + Ray * 2500;
+    double RayLength = 2500;
+    if (Reach > 0)
+    {
+        // Find the far intersection of the camera ray and the emitter's range sphere.
+        const FVector EyeToEmitter = Emitter - Eye;
+        const double Center = FVector::DotProduct(EyeToEmitter, Ray);
+        const double LateralSquared = (EyeToEmitter - Center * Ray).SizeSquared();
+        const double ReachAlongRay = FMath::Sqrt(FMath::Max(0.0, FMath::Square(static_cast<double>(Reach)) - LateralSquared));
+        RayLength = FMath::Max(0.0, Center + ReachAlongRay);
+    }
+    const FVector Far = Eye + Ray * RayLength;
     FCollisionObjectQueryParams Objects = Walls();
     Objects.AddObjectTypesToQuery(ECC_Pawn);
     const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSClassAim), false, &Player());
@@ -656,8 +671,7 @@ void UFSClassCombat::Attack()
     }
     if (Move != EMove::Idle) return;
     if (!Ready(Basic)) { Message(TEXT("Attack recovering")); return; }
-    if (Branch() == 'M') LockProjectileAim();
-    else Heading = AimDirection();
+    Heading = AimDirection();
     UFSCharacterActions::BeginAttackFacing(&Player());
     const EMove AttackMove = Branch() == 'V' ? EMove::Axe : Branch() == 'S' ? EMove::Sword : EMove::Spark;
     Start(AttackMove, AttackMove == EMove::Axe ? 0.95f : AttackMove == EMove::Sword ? 0.52f : 0.38f,
@@ -1241,9 +1255,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
         if (!bCommitted && Age >= 0.10f)
         {
             bCommitted = true;
-            const FVector Origin = Hand();
-            Fire({Origin, ProjectileDirection(Origin, LockedAimPoint, Heading), 9, 1600, 550, 12});
-            if (InsideWard()) PulseWard();
+            bSparkPending = true;
         }
         break;
     case EMove::OrbHold:
@@ -1470,6 +1482,19 @@ void UFSClassCombat::TickComponent(float DeltaTime, ELevelTick TickType, FActorC
     ConsumeInput();
     TickShots(DeltaTime);
     UpdateCamera(DeltaTime);
+}
+
+void UFSClassCombat::EmitPendingSpark(UWorld* World, ELevelTick, float)
+{
+    if (World != GetWorld() || !bSparkPending) return;
+    bSparkPending = false;
+    if (!Class || Unavailable()) return;
+
+    // The camera manager updates after the combat tick. Sample the view used by this frame's HUD.
+    const FVector Origin = Hand();
+    const FVector Direction = ProjectileDirection(Origin, ReticlePoint(Origin, SparkRange), Heading);
+    Fire({Origin, Direction, 9, 1600, SparkRange, 12});
+    if (InsideWard()) PulseWard();
 }
 
 float UFSClassCombat::GuardDamage(float Damage, AActor* Causer)
