@@ -273,7 +273,7 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         return false;
     }
     // The nearest room pair is three cells apart. A room and turn or two turns can be two cells apart.
-    const double MinimumPassage = 0.4 * LocalSpan.X;
+    const double MinimumPassage = 0.32 * LocalSpan.X;
     const double RoomPairPitch = (2.0 * RoomReach + MinimumPassage) / 3.0;
     const double MixedPairPitch = (RoomReach + JunctionReach + MinimumPassage) * 0.5;
     const double JunctionPairPitch = JunctionReach + MinimumPassage * 0.5;
@@ -306,7 +306,8 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         {
             const FTransform* BossPort = Ports.Find(PortKey(FSDungeon::DoorTile(*Boss, Plan.ExitDirection), ExitSide));
             if (!BossPort) return false;
-            const double ExitPassage = 2.0 * LocalSpan.X - 3.0 * CorridorJoinOverlap - 1.0;
+            // Leave one native section between the two door mouths, allowing for floor height differences.
+            const double ExitPassage = LocalSpan.X - 2.0 * CorridorJoinOverlap - 1.0;
             Center = BossPort->GetLocation() + GateRotation.Vector() * ExitPassage - Rotation.RotateVector(ExitMouth);
             Center.Z = 0.0;
         }

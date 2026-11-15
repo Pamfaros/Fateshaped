@@ -99,6 +99,7 @@ struct FRoomPlacement
     int32 HalfHeight;
     int32 Margin;
     int32 NeighborReach;
+    bool bGrowFromDoors = false;
 };
 
 int32 Distance(FIntPoint A, FIntPoint B)
@@ -134,6 +135,47 @@ void IndexRoom(FRoomTiles& RoomTiles, const FRoom& Room, int32 Index)
 bool PlaceRooms(FRandomStream& Random, TArray<FRoom>& Rooms, const FRoomPlacement& Placement)
 {
     Rooms.Add({FIntPoint::ZeroValue, NormalHalfSize, ERoomRole::Entrance});
+    if (Placement.bGrowFromDoors)
+    {
+        while (Rooms.Num() < RoomCount)
+        {
+            TArray<FIntPoint> Candidates;
+            TArray<FIntPoint> AlignedCandidates;
+            for (const FRoom& Room : Rooms)
+            {
+                for (FIntPoint Direction : Directions)
+                {
+                    const FIntPoint Side(-Direction.Y, Direction.X);
+                    for (int32 Step : {3, 4})
+                    {
+                        for (int32 Offset = -1; Offset <= 1; ++Offset)
+                        {
+                            const FIntPoint Center = Room.Center + Direction * Step + Side * Offset;
+                            if (Center.X >= -Placement.Width && Center.X <= Placement.Width
+                                && FMath::Abs(Center.Y) <= Placement.HalfHeight
+                                && Fits(Rooms, {Center, NormalHalfSize}, Placement.Margin))
+                            {
+                                Candidates.AddUnique(Center);
+                                if (Offset == 0) AlignedCandidates.AddUnique(Center);
+                            }
+                        }
+                    }
+                }
+            }
+            if (Candidates.IsEmpty()) return false;
+            // Grow near the entrance and let seeded choices vary which rooms share a wall axis.
+            const TArray<FIntPoint>& Pool = !AlignedCandidates.IsEmpty() && Random.RandRange(0, 2) != 0
+                ? AlignedCandidates : Candidates;
+            FIntPoint Center = Pool[Random.RandHelper(Pool.Num())];
+            for (int32 Draw = 0; Draw < 3; ++Draw)
+            {
+                const FIntPoint Option = Pool[Random.RandHelper(Pool.Num())];
+                if (Distance(Option, FIntPoint::ZeroValue) < Distance(Center, FIntPoint::ZeroValue)) Center = Option;
+            }
+            Rooms.Add({Center, NormalHalfSize});
+        }
+        return true;
+    }
     for (int32 Attempt = 0; Attempt < 220 && Rooms.Num() < RoomCount; ++Attempt)
     {
         const FRoom Candidate{{Random.RandRange(0, Placement.Width), Random.RandRange(-Placement.HalfHeight, Placement.HalfHeight)}, NormalHalfSize};
@@ -328,6 +370,12 @@ TArray<FIntPoint> RouteBetweenPorts(const FPlan& Plan, const FRoomTiles& RoomTil
     TMap<FIntPoint, int32> Goals;
     TArray<FStep> Queue;
     TSet<FIntVector> Seen;
+    int32 MinRouteX = 0;
+    for (const FRoom& Room : Plan.Rooms)
+    {
+        if (Room.Role != ERoomRole::Exit) MinRouteX = FMath::Min(MinRouteX, Room.Center.X);
+    }
+    MinRouteX -= 7;
     for (int32 Index = 0; Index < UE_ARRAY_COUNT(Directions); ++Index)
     {
         const FIntPoint Side = Directions[Index];
@@ -369,7 +417,7 @@ TArray<FIntPoint> RouteBetweenPorts(const FPlan& Plan, const FRoomTiles& RoomTil
             const bool bBend = Side != Step.Side;
             const FStep Candidate{Next, Side, bBend ? 1 : FMath::Min(StepsBetweenBends, Step.StraightSteps + 1),
                 Step.Bends + (bBend ? 1 : 0), Index};
-            if (Next.X < -7 || Next.X > LayoutWidth + 7 || FMath::Abs(Next.Y) > LayoutHalfHeight + 7 || Seen.Contains(Candidate.Key())
+            if (Next.X < MinRouteX || Next.X > LayoutWidth + 7 || FMath::Abs(Next.Y) > LayoutHalfHeight + 7 || Seen.Contains(Candidate.Key())
                 || RoomTiles.Contains(Next)
                 || !CanCarveTile(Plan, RoomTiles, Reserved, Next, A, B, Goals.Contains(Next) ? Junction : nullptr))
             {
@@ -455,10 +503,15 @@ bool ConnectRooms(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint
 }
 
 bool JoinCorridor(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint>& Reserved,
-    int32 Room, const TArray<FIntPoint>& Trunk, TArray<FIntPoint>& Added)
+    int32 Room, const TArray<FIntPoint>& Trunk, TArray<FIntPoint>& Added, bool bPreferNearby)
 {
     const FIntPoint Start = Plan.Rooms[Room].Center;
-    for (FIntPoint Junction : Trunk)
+    TArray<FIntPoint> Junctions = Trunk;
+    if (bPreferNearby)
+    {
+        Junctions.StableSort([&](FIntPoint A, FIntPoint B) { return Distance(Start, A) < Distance(Start, B); });
+    }
+    for (FIntPoint Junction : Junctions)
     {
         const uint8 Ports = CorridorOpenings(Plan, Junction);
         if (Ports != 0b0101 && Ports != 0b1010) continue;
@@ -471,7 +524,7 @@ bool JoinCorridor(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint
             return true;
         }
     }
-    for (FIntPoint Junction : Trunk)
+    for (FIntPoint Junction : Junctions)
     {
         const uint8 Ports = CorridorOpenings(Plan, Junction);
         if (Ports != 0b0101 && Ports != 0b1010) continue;
@@ -588,11 +641,17 @@ bool Build(FRandomStream& Random, FPlan& Plan, const FRoomPlacement& Placement)
         const int32 Room = Order[Index];
         const int32 From = Parent[Room];
         const bool bPreserveEncounterRoute = From == Guardian || From == MainTrap;
-        if (!bPreserveEncounterRoute && JoinCorridor(Plan, RoomTiles, Reserved, Room, Incoming[From], Incoming[Room]))
+        const FIntPoint Delta = Plan.Rooms[Room].Center - Plan.Rooms[From].Center;
+        const bool bShortAligned = Placement.bGrowFromDoors && (Delta.X == 0 || Delta.Y == 0)
+            && Distance(Delta, FIntPoint::ZeroValue) <= 4;
+        if (!bShortAligned && !bPreserveEncounterRoute
+            && JoinCorridor(Plan, RoomTiles, Reserved, Room, Incoming[From], Incoming[Room], Placement.bGrowFromDoors))
         {
             continue;
         }
-        if (!ConnectRooms(Plan, RoomTiles, Reserved, From, Room, Random, &Incoming[Room]))
+        if (!ConnectRooms(Plan, RoomTiles, Reserved, From, Room, Random, &Incoming[Room])
+            && !(bShortAligned && !bPreserveEncounterRoute
+                && JoinCorridor(Plan, RoomTiles, Reserved, Room, Incoming[From], Incoming[Room], Placement.bGrowFromDoors)))
         {
             return false;
         }
@@ -671,9 +730,8 @@ int32 CompactLayoutCost(const FPlan& Plan)
     }
     return Plan.Corridors.Num() + 2 * Distance(Min, Max) + (Plan.Junctions == 0 ? 8 : 0);
 }
-}
 
-bool Generate(int32 Seed, FPlan& OutPlan)
+bool GenerateStandard(int32 Seed, FPlan& OutPlan)
 {
     FRandomStream Random(Seed);
     constexpr int32 CompactAttempts = 18;
@@ -706,5 +764,29 @@ bool Generate(int32 Seed, FPlan& OutPlan)
         }
     }
     return false;
+}
+
+int32 CorridorCost(const FPlan& Plan)
+{
+    // Count the space actually routed outside rooms, including direct links across neighboring doors.
+    return Plan.Corridors.Num() + Plan.DirectRoomDoors.Num() / 2;
+}
+}
+
+bool Generate(int32 Seed, FPlan& OutPlan)
+{
+    bool bFound = GenerateStandard(Seed, OutPlan);
+    FRandomStream Random(Seed);
+    constexpr FRoomPlacement Close{8, 8, 0, 0, true};
+    for (int32 Attempt = 0; Attempt < 36; ++Attempt)
+    {
+        FPlan Candidate;
+        if (Build(Random, Candidate, Close) && (!bFound || CorridorCost(Candidate) < CorridorCost(OutPlan)))
+        {
+            OutPlan = MoveTemp(Candidate);
+            bFound = true;
+        }
+    }
+    return bFound;
 }
 }
