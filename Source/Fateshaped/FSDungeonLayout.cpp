@@ -23,7 +23,6 @@ constexpr double DoorWidth = 240.0;
 constexpr double WallHeight = 460.0;
 using FSDungeon::ERoomRole;
 using FSDungeon::FRoom;
-const FName LegacyGeometryTag(TEXT("FS_LegacyDungeonGeometry"));
 const FName LayoutAttemptedTag(TEXT("FS_DungeonLayoutAttempted"));
 const FName GateTag(TEXT("ExitGate"));
 const FName FirstEncounterTag(TEXT("Enc1"));
@@ -31,7 +30,7 @@ const FName FinalEncounterTag(TEXT("Enc2"));
 const FName DeathHandledTag(TEXT("FS_DeathHandled"));
 constexpr double ChestReach = 230.0;
 
-enum EModule : int32 { NormalRoom, BossRoom, ExitRoom, Straight, RightBend, LeftBend, TJunction, Cross, WallPlug, FinalGate };
+enum EModule : int32 { NormalRoom, BossRoom, ExitRoom, Straight, RightBend, TJunction, WallPlug, FinalGate };
 const FName DoorTags[] = {TEXT("FS_Door_PX"), TEXT("FS_Door_PY"), TEXT("FS_Door_NX"), TEXT("FS_Door_NY")};
 
 FVector TileCenter(const FIntPoint& Tile, double Pitch, double Height = 0.0)
@@ -106,40 +105,24 @@ USceneComponent* FindModulePoint(AActor& Module, FName Tag)
     return Points.Num() == 1 ? Cast<USceneComponent>(Points[0]) : nullptr;
 }
 
-EModule CorridorModule(uint8 Openings, FIntPoint Tile, double& Yaw)
+EModule CorridorModule(uint8 Openings, bool bMirrorBend, double& Yaw, bool& bMirrored)
 {
     const int32 Degree = FMath::CountBits(static_cast<uint32>(Openings));
+    if (Degree < 2 || Degree > 3) return WallPlug;
     const bool bStraight = Openings == 0b0101 || Openings == 0b1010;
-    const bool bRight = (Tile.X + Tile.Y) % 2 == 0;
-    const EModule Module = Degree == 4 ? Cross : Degree == 3 ? TJunction : bStraight ? Straight : bRight ? RightBend : LeftBend;
-    constexpr uint8 DefaultOpenings[] = {0b0101, 0b0110, 0b1100, 0b0111, 0b1111};
+    const EModule Module = Degree == 3 ? TJunction : bStraight ? Straight : RightBend;
+    bMirrored = Module == RightBend && bMirrorBend;
+    constexpr uint8 DefaultOpenings[] = {0b0101, 0b0110, 0b0111};
+    const uint8 LocalOpenings = bMirrored ? 0b1100 : DefaultOpenings[Module - Straight];
     for (int32 Turns = 0; Turns < 4; ++Turns)
     {
-        if (RotateOpenings(DefaultOpenings[Module - Straight], Turns) == Openings)
+        if (RotateOpenings(LocalOpenings, Turns) == Openings)
         {
             Yaw = Turns * 90.0;
             return Module;
         }
     }
     return WallPlug;
-}
-
-UStaticMeshComponent* AddProp(AActor& Owner, UStaticMesh* Mesh, const FVector& Base, double Yaw)
-{
-    if (!Mesh)
-    {
-        return nullptr;
-    }
-    UStaticMeshComponent* Prop = NewObject<UStaticMeshComponent>(&Owner);
-    Prop->SetupAttachment(Owner.GetRootComponent());
-    Prop->SetMobility(EComponentMobility::Movable);
-    Prop->SetStaticMesh(Mesh);
-    Prop->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    const FBoxSphereBounds Bounds = Mesh->GetBounds();
-    Prop->SetRelativeLocation(Base - FVector(0, 0, Bounds.Origin.Z - Bounds.BoxExtent.Z));
-    Prop->SetRelativeRotation(FRotator(0, Yaw, 0));
-    Prop->RegisterComponent();
-    return Prop;
 }
 
 UPointLightComponent* AddLight(AActor& Owner, const FVector& Location, const FLinearColor& Color, float Intensity, float Radius)
@@ -194,31 +177,21 @@ AFSDungeonLayout::AFSDungeonLayout()
     static const ConstructorHelpers::FClassFinder<AActor> Exit(TEXT("/Game/Dungeon/Modules/BP_FS_Room_Exit"));
     static const ConstructorHelpers::FClassFinder<AActor> Line(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Straight"));
     static const ConstructorHelpers::FClassFinder<AActor> Right(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Right"));
-    static const ConstructorHelpers::FClassFinder<AActor> Left(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Left"));
     static const ConstructorHelpers::FClassFinder<AActor> Tee(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_TJunction"));
-    static const ConstructorHelpers::FClassFinder<AActor> Crossing(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Cross"));
     static const ConstructorHelpers::FClassFinder<AActor> Plug(TEXT("/Game/Dungeon/Modules/BP_FS_Door_WallPlug"));
     static const ConstructorHelpers::FClassFinder<AActor> Gate(TEXT("/Game/Dungeon/Modules/BP_FS_Door_FinalGate"));
-    ModuleClasses = {Normal.Class, Boss.Class, Exit.Class, Line.Class, Right.Class, Left.Class, Tee.Class, Crossing.Class, Plug.Class, Gate.Class};
+    ModuleClasses = {Normal.Class, Boss.Class, Exit.Class, Line.Class, Right.Class, Tee.Class, Plug.Class, Gate.Class};
     static const ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Crate(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Crate.SM_Crate"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Barrel(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Barrel.SM_Barrel"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Chest(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Chest.SM_Chest"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> ChestLidAsset(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Lid_Chest.SM_Lid_Chest"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Pipe(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Pipe.SM_Pipe"));
+    static const ConstructorHelpers::FClassFinder<AActor> ClosedChest(TEXT("/Game/Medieval_Sewer_Dungeon/Blueprints/Props/BP_Chest_1"));
+    static const ConstructorHelpers::FClassFinder<AActor> OpenChest(TEXT("/Game/Medieval_Sewer_Dungeon/Blueprints/Props/BP_Chest_3"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cone(TEXT("/Engine/BasicShapes/Cone.Cone"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Telegraph(TEXT("/Game/Combat/FX/MI_FX_Telegraph.MI_FX_Telegraph"));
-    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> FloorMaterial(TEXT("/Game/Medieval_Sewer_Dungeon/Materials_Instance/MI_Large_Room_Floor.MI_Large_Room_Floor"));
-    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> WallMaterial(TEXT("/Game/Medieval_Sewer_Dungeon/Materials_Instance/MI_Large_Wall.MI_Large_Wall"));
-    ConnectorFloorMaterial = FloorMaterial.Object;
-    ConnectorWallMaterial = WallMaterial.Object;
+    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> Stone(TEXT("/Game/Dungeon/Materials/M_FS_Connector_Stone.M_FS_Connector_Stone"));
+    ConnectorMaterial = Stone.Object;
     TrapPlateMesh = Cube.Object;
-    CrateMesh = Crate.Object;
-    BarrelMesh = Barrel.Object;
-    ChestMesh = Chest.Object;
-    ChestLidMesh = ChestLidAsset.Object;
-    PipeMesh = Pipe.Object;
+    ClosedChestClass = ClosedChest.Class;
+    OpenChestClass = OpenChest.Class;
     SpikeMesh = Cone.Object;
     FumeMesh = Sphere.Object;
     TelegraphMaterial = Telegraph.Object;
@@ -236,6 +209,7 @@ AActor* AFSDungeonLayout::SpawnModule(int32 Module, const FTransform& Transform)
 
 void AFSDungeonLayout::Destroyed()
 {
+    if (IsValid(ChestVisual)) ChestVisual->Destroy();
     for (AActor* Actor : SpawnedModules)
     {
         if (IsValid(Actor)) Actor->Destroy();
@@ -261,10 +235,11 @@ void AFSDungeonLayout::GenerateForContract(AActor* Player, const FString& QuestI
     }
 
     AFSDungeonLayout* Layout = World->SpawnActor<AFSDungeonLayout>();
-    if (Layout && !Layout->Build(RunId))
+    if (!Layout || !Layout->Build(RunId))
     {
-        Layout->Destroy();
-        UE_LOG(LogTemp, Warning, TEXT("Forgotten Crypt run %d: layout unavailable, using the authored route."), RunId);
+        if (Layout) Layout->Destroy();
+        UE_LOG(LogTemp, Error, TEXT("Forgotten Crypt run %d: custom modules could not be assembled. Returning to the Guild."), RunId);
+        UGameplayStatics::OpenLevel(Player, FName(TEXT("L_Guild")));
     }
 }
 
@@ -283,7 +258,7 @@ bool AFSDungeonLayout::HasReachedExit(const AActor* Player)
             && FMath::Abs(Offset.Y) <= 155.0 && FMath::Abs(Offset.Z) <= 180.0;
     }
 
-    return Position.X > 2400.0;
+    return false;
 }
 
 bool AFSDungeonLayout::HasLivingCryptEnemies(const AActor* Player)
@@ -363,10 +338,10 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         const int32 Rotation = (FMath::RoundToInt(Yaw / 90.0) % 4 + 4) % 4;
         for (int32 Index = 0; Index < UE_ARRAY_COUNT(DoorTags); ++Index)
         {
+            const int32 Side = (Index + Rotation) % 4;
             const USceneComponent* Door = FindModulePoint(*Module, DoorTags[Index]);
             if (!Door) return false;
             const FTransform Port = Door->GetComponentTransform();
-            const int32 Side = (Index + Rotation) % 4;
             if (Openings & (1 << Side))
             {
                 Ports.Add(PortKey(FSDungeon::DoorTile(Room, FSDungeon::Directions[Side]), Side), Port);
@@ -380,22 +355,38 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
             else if (!Seal(WallPlug, Port)) return false;
         }
     }
+    int32 BendsPlaced = 0;
     for (const FIntPoint Tile : Plan.Corridors)
     {
         double Yaw = 0;
         const uint8 Openings = FSDungeon::CorridorOpenings(Plan, Tile);
-        const EModule Shape = CorridorModule(Openings, Tile, Yaw);
+        bool bMirrored = false;
+        const EModule Shape = CorridorModule(Openings, BendsPlaced % 2 != 0, Yaw, bMirrored);
         if (Shape == WallPlug) return false;
-        AActor* Module = SpawnModule(Shape, FTransform(FRotator(0, Yaw, 0), TileCenter(Tile, TilePitch)));
+        const FVector Scale(1, bMirrored ? -1 : 1, 1);
+        AActor* Module = SpawnModule(Shape, FTransform(FRotator(0, Yaw, 0), TileCenter(Tile, TilePitch), Scale));
         if (!Module) return false;
+        if (Shape == RightBend)
+        {
+            ++BendsPlaced;
+            FVector WorldScale = Module->GetActorScale3D();
+            if ((WorldScale.X * WorldScale.Y * WorldScale.Z < 0) != bMirrored)
+            {
+                WorldScale.Y *= -1;
+                Module->SetActorScale3D(WorldScale);
+            }
+        }
         const int32 Rotation = FMath::RoundToInt(Yaw / 90.0);
         for (int32 Index = 0; Index < UE_ARRAY_COUNT(DoorTags); ++Index)
         {
-            const int32 Side = (Index + Rotation) % 4;
+            const int32 LocalSide = bMirrored ? (4 - Index) % 4 : Index;
+            const int32 Side = (LocalSide + Rotation) % 4;
             if (!(Openings & (1 << Side))) continue;
             const USceneComponent* Port = FindModulePoint(*Module, DoorTags[Index]);
             if (!Port) return false;
-            Ports.Add(PortKey(Tile, Side), Port->GetComponentTransform());
+            const FTransform World = Port->GetComponentTransform();
+            const FVector Outward = World.TransformVector(FVector::ForwardVector).GetSafeNormal2D();
+            Ports.Add(PortKey(Tile, Side), FTransform(Outward.Rotation(), World.GetLocation(), World.GetScale3D().GetAbs()));
         }
     }
 
@@ -423,8 +414,8 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         Mesh->SetCollisionProfileName(TEXT("BlockAll"));
         Mesh->SetGenerateOverlapEvents(false);
         Mesh->RegisterComponent();
-        FloorMesh.AddSection(*Mesh, 0, ConnectorFloorMaterial);
-        WallMesh.AddSection(*Mesh, 1, ConnectorWallMaterial);
+        FloorMesh.AddSection(*Mesh, 0, ConnectorMaterial);
+        WallMesh.AddSection(*Mesh, 1, ConnectorMaterial);
     }
     UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt fitted %.1f cm grid spacing and %d adaptive corridor seams."), TilePitch, Connectors);
     return true;
@@ -432,34 +423,12 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
 
 bool AFSDungeonLayout::Build(int32 RunId)
 {
-    TArray<AActor*> LegacyGeometry;
-    TArray<AActor*> LegacyGates;
-    TArray<ACharacter*> LegacyEnemies;
-    for (TActorIterator<AActor> Actor(GetWorld()); Actor; ++Actor)
-    {
-        if (Actor->ActorHasTag(LegacyGeometryTag))
-        {
-            LegacyGeometry.Add(*Actor);
-        }
-        if (Actor->ActorHasTag(GateTag))
-        {
-            LegacyGates.Add(*Actor);
-            LegacyGeometry.AddUnique(*Actor);
-        }
-        if (ACharacter* Enemy = Cast<ACharacter>(*Actor))
-        {
-            if (Enemy->ActorHasTag(FirstEncounterTag) || Enemy->ActorHasTag(FinalEncounterTag))
-            {
-                LegacyEnemies.Add(Enemy);
-            }
-        }
-    }
-    if (LegacyGeometry.IsEmpty() || ModuleClasses.Contains(nullptr))
+    if (ModuleClasses.Contains(nullptr) || !ConnectorMaterial)
     {
         return false;
     }
     FSDungeon::FPlan Plan;
-    if (!FSDungeon::Generate(RunId, Plan))
+    if (!FSDungeon::Generate(RunId, Plan) && !FSDungeon::Generate(1, Plan))
     {
         return false;
     }
@@ -507,10 +476,6 @@ bool AFSDungeonLayout::Build(int32 RunId)
             return false;
         }
     }
-    for (ACharacter* Enemy : LegacyEnemies)
-    {
-        Enemy->Destroy();
-    }
 
     TArray<EFSCryptRole> EnemyBag{EFSCryptRole::Skirmisher, EFSCryptRole::Skirmisher, EFSCryptRole::Skirmisher, EFSCryptRole::Vanguard};
     constexpr float SpawnChance = 0.60f;
@@ -537,35 +502,17 @@ bool AFSDungeonLayout::Build(int32 RunId)
     for (const FRoom& Room : Plan.Rooms)
     {
         const FVector Center = TileCenter(Room.Center, TilePitch);
-        if (Room.Role == ERoomRole::Exit)
-        {
-            continue;
-        }
-        const FVector2D Extent = RoomExtents[&Room - Plan.Rooms.GetData()];
-        const FVector Corner = Center + FVector(-Extent.X * 0.8, Extent.Y * 0.8, 0);
-
         switch (Room.Role)
         {
-        case ERoomRole::Guardian:
-            AddProp(*this, BarrelMesh, Corner + FVector(60, -10, 0), 20);
-            break;
-        case ERoomRole::Boss:
-            break;
         case ERoomRole::Spikes:
         case ERoomRole::Poison:
             AddTrap(Center, Room.Role == ERoomRole::Spikes, Random.RandRange(0, 1) == 0);
-            if (Room.Role == ERoomRole::Poison)
-            {
-                AddProp(*this, PipeMesh, Corner + FVector(45, 0, 0), 90);
-            }
             break;
         case ERoomRole::Cache:
             AddChest(Center);
-            AddProp(*this, CrateMesh, Corner + FVector(60, -10, 0), 20);
             AddLight(*this, Center + FVector(0, 0, 160), FLinearColor(1.0f, 0.72f, 0.24f), 14000, 600);
             break;
         default:
-            AddProp(*this, CrateMesh, Corner + FVector(60, -10, 0), 20);
             break;
         }
     }
@@ -573,12 +520,6 @@ bool AFSDungeonLayout::Build(int32 RunId)
     const FRotator GateRotation = FVector(Plan.ExitDirection.X, Plan.ExitDirection.Y, 0).Rotation();
     AddLabel(*this, TEXT("ExitLabel"), ExitCenter + FVector(0, 0, 105), GateRotation.Yaw + 180, TEXT("RETURN TO GUILD"));
 
-    for (AActor* Gate : LegacyGates) Gate->Tags.Remove(GateTag);
-    for (AActor* Actor : LegacyGeometry)
-    {
-        Actor->SetActorHiddenInGame(true);
-        Actor->SetActorEnableCollision(false);
-    }
     SetActorTickEnabled(true);
     UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt run %d: %d rooms, %d tiles, %d L bends, %d T junctions, %d shortcuts, %d traps, %d enemies."),
         RunId, Plan.Rooms.Num(), Plan.Tiles.Num(), Plan.Corners, Plan.Junctions, Plan.Shortcuts, Traps.Num(), Spawned.Num());
@@ -588,13 +529,35 @@ bool AFSDungeonLayout::Build(int32 RunId)
 void AFSDungeonLayout::AddChest(const FVector& Center)
 {
     ChestCenter = Center;
-    const UStaticMeshComponent* Base = AddProp(*this, ChestMesh, Center, 180);
-    const double Height = Base ? Base->Bounds.GetBox().Max.Z : 45;
-    ChestLid = AddProp(*this, ChestLidMesh, Center + FVector(0, 0, Height), 180);
-    ChestLabel = AddLabel(*this, TEXT("CacheChest"), Center + FVector(0, 0, Height + 80), 180, TEXT("[E] OPEN CHEST"));
+    ChestVisual = SpawnChestVisual(ClosedChestClass);
+    ChestLabel = AddLabel(*this, TEXT("CacheChest"), Center + FVector(0, 0, 125), 180, TEXT("[E] OPEN CHEST"));
     ChestLabel->SetWorldSize(32);
     ChestLabel->SetTextRenderColor(FColor(255, 205, 110));
     ChestLabel->SetVisibility(false);
+}
+
+AActor* AFSDungeonLayout::SpawnChestVisual(TSubclassOf<AActor> Visual)
+{
+    if (!Visual) return nullptr;
+    FActorSpawnParameters Params;
+    Params.Owner = this;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AActor* Chest = GetWorld()->SpawnActor<AActor>(Visual, ChestCenter, FRotator(0, 180, 0), Params);
+    if (Chest)
+    {
+        Chest->SetActorEnableCollision(false);
+        // Both props share a chest body with an offset pivot. Align the body rather than the open lid or loot.
+        TInlineComponentArray<UStaticMeshComponent*> Meshes(Chest);
+        for (const UStaticMeshComponent* Mesh : Meshes)
+        {
+            if (Mesh->GetFName() != TEXT("SM_Chest")) continue;
+            const FBoxSphereBounds& Bounds = Mesh->Bounds;
+            const FVector Base(Bounds.Origin.X, Bounds.Origin.Y, Bounds.Origin.Z - Bounds.BoxExtent.Z);
+            Chest->AddActorWorldOffset(ChestCenter - Base, false, nullptr, ETeleportType::TeleportPhysics);
+            break;
+        }
+    }
+    return Chest;
 }
 
 void AFSDungeonLayout::InteractWithChest(AActor* Player)
@@ -615,20 +578,25 @@ void AFSDungeonLayout::TryOpenChest(AActor& Player)
         return;
     }
 
+    AActor* OpenVisual = SpawnChestVisual(OpenChestClass);
+    if (!OpenVisual)
+    {
+        ShowRewardMessage(Player, TEXT("Chest could not be opened. Press E to retry."));
+        return;
+    }
+
     const FFSReward Reward{0, TEXT("Arcane Crystal")};
     if (!UFSRewardLibrary::TryGrantExpeditionReward(&Player, Reward))
     {
+        OpenVisual->Destroy();
         ShowRewardMessage(Player, TEXT("Chest reward could not be saved. Press E to retry."));
         return;
     }
 
     bChestOpened = true;
     ChestLabel->SetText(FText::FromString(TEXT("EMPTY CHEST")));
-    if (ChestLid)
-    {
-        ChestLid->AddRelativeLocation(FVector(0, -15, 16));
-        ChestLid->SetRelativeRotation(FRotator(62, 180, 0));
-    }
+    if (IsValid(ChestVisual)) ChestVisual->Destroy();
+    ChestVisual = OpenVisual;
     ShowRewardMessage(Player, TEXT("Chest opened: Arcane Crystal"));
 }
 

@@ -485,13 +485,14 @@ Use a **handcrafted and validated map** built from modular rooms (approximately 
 
 The second run may use **the same map** with a small encounter variation (different enemy positioning, an additional enemy type, or cosmetic lighting changes). From a scope perspective, demonstrating the new Spellsword ability matters far more than building an entirely new biome.
 
-The Forgotten Crypt assembles the prepared Actor Blueprints in `/Game/Dungeon/Modules`. Use the Components viewport to edit their geometry, materials, lighting and portal. The normal room also serves as the entrance and hosts encounter, trap or cache roles. The boss and exit have dedicated templates.
+The Forgotten Crypt assembles the prepared Actor Blueprints in `/Game/Dungeon/Modules` with the custom meshes in `/Game/Models/Dungeon`. Use the Components viewport to edit their geometry, materials, lighting and portal. The normal room also serves as the entrance and hosts encounter, trap or cache roles. The boss and exit have dedicated meshes.
 
 - Keep each module origin on its walkable floor. The planner reserves 5 × 5, 7 × 7 and 3 × 3 logical cells for normal, boss and exit rooms. World spacing follows the authored port positions. Mesh components keep their authored scale.
 - Set `Door_PX`, `Door_PY`, `Door_NX` and `Door_NY` at floor level in the actual openings. Keep their `FS_Door_*` tags and point each local X axis outward along its named side. Scale Y/Z on a marker to specify opening width and height relative to 240 × 460 cm. The generator places `BP_FS_Door_WallPlug` at unused room ports.
-- The straight, right bend, left bend, T and cross corridor Blueprints each occupy one logical cell. Blue arrows show their independent Scene Component ports in the Blueprint viewport. Move the parent `Door_*` component when changing an opening. The generator rotates modules in 90° steps and builds collidable seams between their actual port transforms.
+- The generator uses straight, right bend and T corridor Blueprints. Each occupies one logical cell. The right bend mesh serves both corner orientations through rotation and reflection. Blue arrows show the independent Scene Component ports in the Blueprint viewport. Move the parent `Door_*` component when changing an opening. The generator rotates modules in 90° steps and builds collidable seams between their actual port transforms with `M_FS_Connector_Stone`.
 - An uninterrupted corridor has at least two straight tiles between consecutive corner modules. An obstacle-routing connection can use up to four bends.
 - In `BP_FS_Room_Exit`, the tagged `ExitTrigger` component sets the completion point. `BP_FS_Door_FinalGate` fits the connected exit doorway and uses the encounter's existing unlock condition.
+- Enter `L_Dungeon_01` from the Guild quest portal to assemble the expedition. A failed assembly returns the player to the Guild so they can retry.
 
 ### 13.2. Long-Term Procedural Generation [POST-JAM]
 

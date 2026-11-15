@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-138 balances Guild lighting and contains the player within the hall. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-142 assembles the Crypt from the custom module kit. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -89,6 +89,10 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-136 · Corridor bend spacing — COMPILED + PIE_TESTED.** Obstacle routing permits up to four bends per connection and requires two straight tiles between consecutive corners. All 256 seeds passed. Seed 1 dropped from 26 to 13 bends and completed a scripted expedition. Packaged testing remains pending.
 - **FS-137 · Adaptive module ports and final gate — COMPILED + PIE_TESTED.** Room and corridor transforms determine layout spacing, collidable seams, plug placement and the final gate. Added editor arrows at corridor ports. Verified the custom room, varied module dimensions and the exit unlock in PIE. Packaged testing remains pending.
 - **FS-138 · Guild lighting and boundary — CREATED + PIE_TESTED.** Tuned daylight, skylight, torches and the counter lamp. Added invisible Blocking Volumes on all four sides and above the roof. Checked pawn collision, camera channel and the contract loop. Packaged testing remains pending.
+- **FS-139 · Three-way corridor junctions — COMPILED + PIE_TESTED.** Attach corridor branches to straight sections and reject four-way connection masks. Removed the generator's cross-template reference. All 256 seeded plans and a scripted expedition passed. Packaged testing remains pending.
+- **FS-140 · Chest Blueprint states — COMPILED + PIE_TESTED.** The Crypt chest switches from `BP_Chest_1` to `BP_Chest_3` after a successful reward save. Verified a failed save, retry and duplicate interaction. Packaged testing remains pending.
+- **FS-141 · Custom room and corridor fit — COMPILED + PIE_TESTED.** Fitted the authored corridor meshes and independent ports. Both bend orientations use the right bend Blueprint. Removed the unused cross Blueprint. Checked capsule clearance in both orientations.
+- **FS-142 · Custom-only Crypt geometry — COMPILED + PIE_TESTED.** Bound the exit and door Blueprints to the custom kit. Removed the prototype route from `L_Dungeon_01` and the old geometry fallback from runtime. Added a matte stone seam material. All 256 seeded plans passed. A scripted expedition checked all eight module types, doorway collision, walking to the portal, rewards and Guild return. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 

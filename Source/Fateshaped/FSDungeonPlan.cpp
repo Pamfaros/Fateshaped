@@ -398,16 +398,11 @@ bool JoinCorridor(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint
     const FIntPoint Start = Plan.Rooms[Room].Center;
     for (FIntPoint Junction : Trunk)
     {
-        const auto IsOpen = [&](FIntPoint Direction)
-        {
-            return Plan.Corridors.Contains(Junction + Direction) || RoomTiles.Contains(Junction + Direction);
-        };
-        const int32 Horizontal = IsOpen(Directions[0]) + IsOpen(Directions[2]);
-        const int32 Vertical = IsOpen(Directions[1]) + IsOpen(Directions[3]);
-        if (Horizontal != 2 && Vertical != 2) continue;
-        // Join a straight trunk perpendicularly or complete the missing arm of a T.
-        const TArray<FIntPoint> Path = MakeL(Start, Junction, Horizontal == 2);
-        if (Path.Num() >= 2 && !IsOpen(Path[Path.Num() - 2] - Junction)
+        const uint8 Ports = CorridorOpenings(Plan, Junction);
+        if (Ports != 0b0101 && Ports != 0b1010) continue;
+        const bool bHorizontal = Ports == 0b0101;
+        const TArray<FIntPoint> Path = MakeL(Start, Junction, bHorizontal);
+        if (Path.Num() >= 2 && (bHorizontal ? Path[Path.Num() - 2].X == Junction.X : Path[Path.Num() - 2].Y == Junction.Y)
             && CanCarve(Plan, Path, RoomTiles, Reserved, Room, INDEX_NONE, &Junction))
         {
             Carve(Plan, RoomTiles, Path, &Added);
@@ -417,7 +412,7 @@ bool JoinCorridor(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint
     for (FIntPoint Junction : Trunk)
     {
         const uint8 Ports = CorridorOpenings(Plan, Junction);
-        if (Ports != 0b0101 && Ports != 0b1010 && FMath::CountBits(static_cast<uint32>(Ports)) != 3) continue;
+        if (Ports != 0b0101 && Ports != 0b1010) continue;
         const TArray<FIntPoint> Path = RouteBetweenPorts(Plan, RoomTiles, Reserved, Room, INDEX_NONE, &Junction);
         if (Path.IsEmpty()) continue;
         Carve(Plan, RoomTiles, Path, &Added);
@@ -573,9 +568,9 @@ bool Build(FRandomStream& Random, FPlan& Plan)
     {
         const uint8 Openings = CorridorOpenings(Plan, Tile);
         const int32 Degree = FMath::CountBits(static_cast<uint32>(Openings));
-        if (Degree < 2) return false;
+        if (Degree < 2 || Degree > 3) return false;
         Plan.Corners += Degree == 2 && Openings != 0b0101 && Openings != 0b1010;
-        Plan.Junctions += Degree >= 3;
+        Plan.Junctions += Degree == 3;
     }
 
     const TSet<FIntPoint> BeforeGate = Flood(Plan.Tiles, &Plan.GateTile);

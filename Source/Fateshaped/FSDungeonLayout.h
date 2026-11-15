@@ -40,6 +40,7 @@ private:
     AActor* SpawnModule(int32 Module, const FTransform& Transform);
     void AddTrap(const FVector& Center, bool bSpikes, bool bAlongX);
     void AddChest(const FVector& Center);
+    AActor* SpawnChestVisual(TSubclassOf<AActor> Visual);
     void UpdateChest(const AActor& Player);
     void TryOpenChest(AActor& Player);
     void TryGrantKillExperience(AActor& Player);
@@ -48,7 +49,8 @@ private:
     void OnEncounterDamage(AActor* Enemy, float Damage, const UDamageType* DamageType, AController* EventInstigator, AActor* DamageCauser);
 
     UTextRenderComponent* ChestLabel = nullptr;
-    UStaticMeshComponent* ChestLid = nullptr;
+    UPROPERTY(Transient)
+    TObjectPtr<AActor> ChestVisual;
     FVector ChestCenter = FVector::ZeroVector;
     bool bChestOpened = false;
     int32 PendingKillExperience = 0;
@@ -82,19 +84,10 @@ private:
     TObjectPtr<UStaticMesh> TrapPlateMesh;
 
     UPROPERTY()
-    TObjectPtr<UStaticMesh> CrateMesh;
+    TSubclassOf<AActor> ClosedChestClass;
 
     UPROPERTY()
-    TObjectPtr<UStaticMesh> BarrelMesh;
-
-    UPROPERTY()
-    TObjectPtr<UStaticMesh> ChestMesh;
-
-    UPROPERTY()
-    TObjectPtr<UStaticMesh> ChestLidMesh;
-
-    UPROPERTY()
-    TObjectPtr<UStaticMesh> PipeMesh;
+    TSubclassOf<AActor> OpenChestClass;
 
     UPROPERTY()
     TObjectPtr<UStaticMesh> SpikeMesh;
@@ -106,10 +99,7 @@ private:
     TObjectPtr<UMaterialInterface> TelegraphMaterial;
 
     UPROPERTY()
-    TObjectPtr<UMaterialInterface> ConnectorFloorMaterial;
-
-    UPROPERTY()
-    TObjectPtr<UMaterialInterface> ConnectorWallMaterial;
+    TObjectPtr<UMaterialInterface> ConnectorMaterial;
 
     FVector ExitCenter = FVector::ZeroVector;
 };
