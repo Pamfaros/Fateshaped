@@ -560,7 +560,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
         }
     }
 
-    TArray<EFSCryptRole> EnemyBag{EFSCryptRole::Skirmisher, EFSCryptRole::Skirmisher, EFSCryptRole::Skirmisher, EFSCryptRole::Vanguard};
+    TArray<EFSCryptRole> EnemyBag{EFSCryptRole::Skirmisher, EFSCryptRole::Vanguard};
     constexpr float SpawnChance = 0.60f;
     for (const FRoom& Room : Plan.Rooms)
     {
@@ -589,8 +589,12 @@ bool AFSDungeonLayout::Build(int32 RunId)
         {
         case ERoomRole::Spikes:
         case ERoomRole::Poison:
-            AddTrap(Center, Room.Role == ERoomRole::Spikes, Random.RandRange(0, 1) == 0);
+        {
+            const int32 RoomIndex = &Room - Plan.Rooms.GetData();
+            AddTrap(Center, Room.Role == ERoomRole::Spikes, RoomExtents[RoomIndex],
+                FSDungeon::RoomOpenings(Plan, Room), Random.GetUnsignedInt());
             break;
+        }
         case ERoomRole::Cache:
             AddChest(Center);
             AddLight(*this, Center + FVector(0, 0, 160), FLinearColor(1.0f, 0.72f, 0.24f), 14000, 600);
@@ -737,85 +741,75 @@ void AFSDungeonLayout::TryGrantKillExperience(AActor& Player)
     }
 }
 
-void AFSDungeonLayout::AddTrap(const FVector& Center, bool bSpikes, bool bAlongX)
+void AFSDungeonLayout::AddTrap(const FVector& Center, bool bSpikes, const FVector2D& RoomExtent, uint8 Openings, int32 Seed)
 {
+    constexpr int32 Grid = FSDungeon::FTrapMaze::Grid;
+    const double FitX = FMath::Max(RoomExtent.X - DoorWidth * 0.5, RoomExtent.X * 0.72);
+    const double FitY = FMath::Max(RoomExtent.Y - DoorWidth * 0.5, RoomExtent.Y * 0.72);
+    const double CellX = FMath::Max(40.0, FitX * 2.0 / Grid);
+    const double CellY = FMath::Max(40.0, FitY * 2.0 / Grid);
+    const FVector Origin = Center - FVector(CellX * Grid * 0.5, CellY * Grid * 0.5, 0);
+
+    FSDungeon::FTrapMaze Maze;
+    const bool bMaze = FSDungeon::BuildTrapMaze(Seed, Openings, CellX, CellY, DoorWidth, Maze);
     FTrap& Trap = Traps.AddDefaulted_GetRef();
     Trap.Center = Center;
     Trap.bSpikes = bSpikes;
-    Trap.HalfExtent = bSpikes ? FVector(180, 92, 55) : FVector(165, 165, 140);
-    if (bSpikes && !bAlongX)
-    {
-        Swap(Trap.HalfExtent.X, Trap.HalfExtent.Y);
-    }
+    Trap.HazardHeight = bSpikes ? 70.0 : 140.0;
+    const FLinearColor Color = bSpikes ? FLinearColor(1.0f, 0.82f, 0.08f) : FLinearColor(0.12f, 0.86f, 0.18f);
+    UMaterialInstanceDynamic* FloorMaterial = TelegraphMaterial ? UMaterialInstanceDynamic::Create(TelegraphMaterial, this) : nullptr;
+    if (FloorMaterial) FloorMaterial->SetVectorParameterValue(TEXT("Color"), Color);
 
-    const FLinearColor Color = bSpikes ? FLinearColor(1.0f, 0.22f, 0.06f) : FLinearColor(0.24f, 1.0f, 0.28f);
-    UStaticMeshComponent* Plate = NewObject<UStaticMeshComponent>(this);
-    Plate->SetupAttachment(GetRootComponent());
-    Plate->SetMobility(EComponentMobility::Movable);
-    Plate->SetStaticMesh(TrapPlateMesh);
-    Plate->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Plate->SetRelativeLocation(Center + FVector(0, 0, 2));
-    Plate->SetRelativeScale3D(FVector(Trap.HalfExtent.X / 50, Trap.HalfExtent.Y / 50, 0.025));
-    if (UMaterialInstanceDynamic* Material = Plate->CreateDynamicMaterialInstance(0, TelegraphMaterial))
+    const auto AddMesh = [&](UStaticMesh* Mesh, const FVector& Location, const FVector& Size)
     {
-        Material->SetVectorParameterValue(TEXT("Color"), Color);
-    }
-    Plate->RegisterComponent();
+        UStaticMeshComponent* Box = NewObject<UStaticMeshComponent>(this);
+        Box->SetupAttachment(GetRootComponent());
+        Box->SetMobility(EComponentMobility::Movable);
+        Box->SetStaticMesh(Mesh);
+        if (FloorMaterial) Box->SetMaterial(0, FloorMaterial);
+        Box->SetRelativeLocation(Location);
+        Box->SetRelativeScale3D(FVector(Size.X / 100.0, Size.Y / 100.0, Size.Z / 100.0));
+        Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Box->SetVisibility(false);
+        Box->RegisterComponent();
+        return Box;
+    };
 
-    for (int32 X = -1; X <= 1; ++X)
+    for (int32 Y = 0; Y < Grid; ++Y)
     {
-        for (int32 Y = -1; Y <= 1; ++Y)
+        for (int32 X = 0; X < Grid; ++X)
         {
-            UStaticMeshComponent* Hazard = NewObject<UStaticMeshComponent>(this);
-            Hazard->SetupAttachment(GetRootComponent());
-            Hazard->SetMobility(EComponentMobility::Movable);
-            Hazard->SetStaticMesh(bSpikes ? SpikeMesh : FumeMesh);
-            Hazard->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            Hazard->SetRelativeLocation(Center + FVector(X * Trap.HalfExtent.X * 0.59, Y * Trap.HalfExtent.Y * 0.59, bSpikes ? 29 : 55));
-            Hazard->SetRelativeScale3D(bSpikes ? FVector(0.40, 0.40, 0.60) : FVector(1.15, 1.15, 0.9));
-            if (!bSpikes)
-            {
-                Hazard->SetMaterial(0, Plate->GetMaterial(0));
-            }
-            Hazard->RegisterComponent();
-            Trap.Hazards.Add(Hazard);
+            if (bMaze && !Maze.bTrap[X][Y]) continue;
+            FTrap::FCell& Cell = Trap.Cells.AddDefaulted_GetRef();
+            Cell.Center = Origin + FVector((X + 0.5) * CellX, (Y + 0.5) * CellY, 0);
+            Cell.HalfX = CellX * 0.5;
+            Cell.HalfY = CellY * 0.5;
+            Cell.Floor = AddMesh(TrapPlateMesh, Cell.Center + FVector(0, 0, 4), FVector(CellX * 0.92, CellY * 0.92, 2.5));
+            Cell.Hazard = AddMesh(bSpikes ? SpikeMesh : FumeMesh, Cell.Center + FVector(0, 0, bSpikes ? 28 : 55),
+                bSpikes ? FVector(CellX * 0.28, CellY * 0.28, 56) : FVector(CellX * 0.42, CellY * 0.42, 70));
         }
     }
-
-    Trap.Light = AddLight(*this, Center + FVector(0, 0, 95), Color, 1500, 530);
-    Trap.Label = AddLabel(*this, bSpikes ? FName(TEXT("SpikeTrap")) : FName(TEXT("PoisonTrap")), Center + FVector(0, 0, 135), 180, TEXT(""));
-    Trap.Label->SetTextRenderColor(Color.ToFColor(true));
-    SetTrapPhase(Trap, FTrap::EPhase::Idle, 0);
 }
 
-void AFSDungeonLayout::SetTrapPhase(FTrap& Trap, FTrap::EPhase Phase, double Time)
+void AFSDungeonLayout::SetCellPhase(FTrap& Trap, FTrap::FCell& Cell, FTrap::EPhase Phase, double Time)
 {
-    Trap.Phase = Phase;
+    Cell.Phase = Phase;
     const bool bActive = Phase == FTrap::EPhase::Active;
     const bool bWarning = Phase == FTrap::EPhase::Warning;
-    for (UStaticMeshComponent* Hazard : Trap.Hazards)
-    {
-        Hazard->SetVisibility(bActive);
-    }
-    Trap.Light->SetIntensity(bActive ? 18000 : (bWarning ? 10500 : 1500));
-    const TCHAR* Message = Trap.bSpikes ? TEXT("SPIKES") : TEXT("POISON VENT");
+    if (Cell.Floor) Cell.Floor->SetVisibility(bWarning || bActive);
+    if (Cell.Hazard) Cell.Hazard->SetVisibility(bActive);
     if (bWarning)
     {
-        Message = Trap.bSpikes ? TEXT("SPIKES ARMING") : TEXT("POISON BUILDING");
-    }
-    Trap.Label->SetText(FText::FromString(Message));
-    if (bWarning)
-    {
-        Trap.NextPhase = Time + 0.85;
+        Cell.NextPhase = Time + 0.85;
     }
     else if (bActive)
     {
-        Trap.NextPhase = Time + (Trap.bSpikes ? 0.45 : 2.05);
-        Trap.NextDamage = Time;
+        Cell.NextPhase = Time + (Trap.bSpikes ? 0.45 : 2.05);
+        Cell.NextDamage = Time;
     }
     else if (Phase == FTrap::EPhase::Recovering)
     {
-        Trap.NextPhase = Time + 1.25;
+        Cell.NextPhase = Time + 1.25;
     }
 }
 
@@ -843,31 +837,31 @@ void AFSDungeonLayout::Tick(float DeltaSeconds)
     for (FTrap& Trap : Traps)
     {
         using EPhase = FTrap::EPhase;
-        const FVector Offset = Position - Trap.Center;
-        const bool bInFootprint = FMath::Abs(Offset.X) <= Trap.HalfExtent.X && FMath::Abs(Offset.Y) <= Trap.HalfExtent.Y;
-        const bool bInReach = bInFootprint && FeetZ < Trap.Center.Z + Trap.HalfExtent.Z;
-        Trap.Label->SetRelativeRotation(FRotator(0, Offset.Rotation().Yaw, 0));
-
-        switch (Trap.Phase)
+        for (FTrap::FCell& Cell : Trap.Cells)
         {
-        case EPhase::Idle:
-            if (bInReach) SetTrapPhase(Trap, EPhase::Warning, Time);
-            break;
-        case EPhase::Warning:
-            if (Time >= Trap.NextPhase) SetTrapPhase(Trap, EPhase::Active, Time);
-            break;
-        case EPhase::Active:
-            if (Time >= Trap.NextPhase) SetTrapPhase(Trap, EPhase::Recovering, Time);
-            break;
-        case EPhase::Recovering:
-            if (Time >= Trap.NextPhase && !bInFootprint) SetTrapPhase(Trap, EPhase::Idle, Time);
-            break;
-        }
-
-        if (Trap.Phase == EPhase::Active && bInReach && Time >= Trap.NextDamage)
-        {
-            UGameplayStatics::ApplyDamage(Player, Trap.bSpikes ? 24.0f : 7.0f, nullptr, this, nullptr);
-            Trap.NextDamage = Trap.bSpikes ? Trap.NextPhase : Time + 0.55;
+            const bool bInside = FMath::Abs(Position.X - Cell.Center.X) <= Cell.HalfX
+                && FMath::Abs(Position.Y - Cell.Center.Y) <= Cell.HalfY
+                && FeetZ < Cell.Center.Z + Trap.HazardHeight;
+            switch (Cell.Phase)
+            {
+            case EPhase::Idle:
+                if (bInside) SetCellPhase(Trap, Cell, EPhase::Warning, Time);
+                break;
+            case EPhase::Warning:
+                if (Time >= Cell.NextPhase) SetCellPhase(Trap, Cell, EPhase::Active, Time);
+                break;
+            case EPhase::Active:
+                if (Time >= Cell.NextPhase) SetCellPhase(Trap, Cell, EPhase::Recovering, Time);
+                break;
+            case EPhase::Recovering:
+                if (Time >= Cell.NextPhase && !bInside) SetCellPhase(Trap, Cell, EPhase::Idle, Time);
+                break;
+            }
+            if (Cell.Phase == EPhase::Active && bInside && Time >= Cell.NextDamage)
+            {
+                UGameplayStatics::ApplyDamage(Player, Trap.bSpikes ? 24.0f : 7.0f, nullptr, this, nullptr);
+                Cell.NextDamage = Trap.bSpikes ? Cell.NextPhase : Time + 0.55;
+            }
         }
     }
 }

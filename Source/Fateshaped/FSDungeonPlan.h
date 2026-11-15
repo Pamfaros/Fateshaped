@@ -41,4 +41,12 @@ uint8 CorridorOpenings(const FPlan& Plan, FIntPoint Tile);
 bool IsStraight(uint8 Openings);
 bool HasSpacedCorners(const FPlan& Plan);
 bool Generate(int32 Seed, FPlan& OutPlan);
+
+struct FTrapMaze
+{
+    static constexpr int32 Grid = 8;
+    bool bTrap[Grid][Grid];
+};
+
+bool BuildTrapMaze(int32 Seed, uint8 Openings, double CellX, double CellY, double DoorWidth, FTrapMaze& OutMaze);
 }

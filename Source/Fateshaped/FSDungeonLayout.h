@@ -39,7 +39,7 @@ private:
     bool BuildModules(const FSDungeon::FPlan& Plan, double& TilePitch, TArray<FVector2D>& RoomExtents);
     void BuildStormCeiling();
     AActor* SpawnModule(int32 Module, const FTransform& Transform);
-    void AddTrap(const FVector& Center, bool bSpikes, bool bAlongX);
+    void AddTrap(const FVector& Center, bool bSpikes, const FVector2D& RoomExtent, uint8 Openings, int32 Seed);
     void AddChest(const FVector& Center);
     AActor* SpawnChestVisual(TSubclassOf<AActor> Visual);
     void UpdateChest(const AActor& Player);
@@ -61,18 +61,25 @@ private:
     {
         enum class EPhase : uint8 { Idle, Warning, Active, Recovering };
 
+        struct FCell
+        {
+            FVector Center = FVector::ZeroVector;
+            double HalfX = 0;
+            double HalfY = 0;
+            EPhase Phase = EPhase::Idle;
+            double NextPhase = 0;
+            double NextDamage = 0;
+            UStaticMeshComponent* Floor = nullptr;
+            UStaticMeshComponent* Hazard = nullptr;
+        };
+
         FVector Center;
-        FVector HalfExtent;
-        TArray<UStaticMeshComponent*> Hazards;
-        UPointLightComponent* Light = nullptr;
-        UTextRenderComponent* Label = nullptr;
-        EPhase Phase = EPhase::Idle;
-        double NextPhase = 0.0;
-        double NextDamage = 0.0;
+        double HazardHeight = 70;
+        TArray<FCell> Cells;
         bool bSpikes = false;
     };
 
-    void SetTrapPhase(FTrap& Trap, FTrap::EPhase Phase, double Time);
+    void SetCellPhase(FTrap& Trap, FTrap::FCell& Cell, FTrap::EPhase Phase, double Time);
     TArray<FTrap> Traps;
 
     UPROPERTY()

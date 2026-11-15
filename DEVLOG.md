@@ -16,6 +16,17 @@ Refresh a field when its evidence changes. Read `TASKS.md` for the current task,
 
 ## Entries
 
+## 2026-11-15 · Startup menu over the exit portal
+
+- The startup screen no longer paints an opaque backdrop. The panel stays on the left. Before pause, the view switches to a temporary camera aimed at the Guild actor tagged or named `QuestPortal`, offset from the player’s approach so the portal sits in the open side of the frame. The pawn is hidden for that shot. Start restores the pawn, its visibility, and the play camera.
+- **COMPILED:** `FSGameViewportClient.cpp` compiled. The open editor locked `UnrealEditor-Fateshaped.dll`, so the module was linked as `UnrealEditor-Fateshaped-0154.dll` and the editor module manifest points at it. Restart the editor to load the change. PIE is **NOT_TESTED**.
+
+## 2026-11-15 · FS-153 Trap-room maze
+
+- The optional encounter bag is now one Skirmisher and one Vanguard, so a run can add at most two foes beside the guardian and the Warden. Each spike or poison room keeps its normal module. An 8×8 random walk marks hidden trap cells and leaves one connected safe route through the doorways. There are no added walls and no SPIKES / POISON VENT labels.
+- Stepping on a hidden cell starts that cell's arming timer. During the warning only that floor turns yellow for spikes or green for poison. When it fires, the spike cones or poison fumes appear on that cell and the previous damage timing still applies. The tint hides again after recovery once the player leaves the cell.
+- **COMPILED:** Win64 Development Editor linked `UnrealEditor-Fateshaped.dll`. Automation `Fateshaped.Dungeon.SeededPlans` completed with Result=Success, including full maze connectivity, a closed perimeter, east/west door gaps and a stable seed. PIE of the built room, colors and enemy cap is **NOT_TESTED**. Next P0 remains the packaged contract loop and save reload.
+
 Add a short entry per checkpoint or blocker, newest first. Capture the test result and any decision that changes the plan. Keep recurring facts in Current state.
 
 > **2026-11-12 · Redesign / FS-101 · PIE_TESTED via tools (budget checkpoint)**

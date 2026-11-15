@@ -3,6 +3,8 @@
 #include "Engine/GameViewportClient.h"
 #include "FSGameViewportClient.generated.h"
 
+class ACameraActor;
+class APawn;
 class SFSPauseMenu;
 class SFSMainMenu;
 
@@ -19,6 +21,8 @@ public:
 
 private:
     void OpenMainMenu(APlayerController& Player);
+    void FrameExitPortal(APlayerController& Player);
+    void ClearMenuView();
     void StartGame();
     void CaptureMenuInput(APlayerController& Player, TSharedPtr<SWidget> InitialFocus);
     void RestoreGameInput();
@@ -31,6 +35,9 @@ private:
     TSharedPtr<SFSPauseMenu> PauseMenu;
     TSharedPtr<SFSMainMenu> MainMenu;
     TWeakObjectPtr<APlayerController> PausedPlayer;
+    TWeakObjectPtr<ACameraActor> MenuCamera;
+    TWeakObjectPtr<APawn> HiddenMenuPawn;
+    bool bMenuPawnWasHidden = false;
     float MasterVolume = 1.0f;
     bool bVolumeChanged = false;
     bool bPausedByMenu = false;

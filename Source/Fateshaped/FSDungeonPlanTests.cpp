@@ -74,6 +74,56 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
                 First.Rooms[Index].Center == Repeat.Rooms[Index].Center && First.Rooms[Index].Role == Repeat.Rooms[Index].Role);
         }
     }
+    FTrapMaze Maze;
+    TestTrue(TEXT("Random walk lays out hidden trap cells"), BuildTrapMaze(7, 0b0101, 120.0, 120.0, 240.0, Maze));
+    int32 TrapCount = 0;
+    int32 SafeCount = 0;
+    FIntPoint SafeStart = FIntPoint::ZeroValue;
+    for (int32 Y = 0; Y < FTrapMaze::Grid; ++Y)
+    {
+        for (int32 X = 0; X < FTrapMaze::Grid; ++X)
+        {
+            if (Maze.bTrap[X][Y]) ++TrapCount;
+            else
+            {
+                if (SafeCount == 0) SafeStart = FIntPoint(X, Y);
+                ++SafeCount;
+            }
+        }
+    }
+    for (int32 X = 0; X < FTrapMaze::Grid; ++X)
+    {
+        TestTrue(TEXT("A closed side stays trapped"), Maze.bTrap[X][0]);
+    }
+    TestTrue(TEXT("The floor keeps hidden traps and a safe route"), TrapCount > 0 && SafeCount > 1);
+    TestFalse(TEXT("Door cells are safe"), Maze.bTrap[0][3] || Maze.bTrap[0][4] || Maze.bTrap[7][3] || Maze.bTrap[7][4]);
+    bool Seen[FTrapMaze::Grid][FTrapMaze::Grid] = {};
+    TArray<FIntPoint> Pending;
+    Pending.Add(SafeStart);
+    Seen[SafeStart.X][SafeStart.Y] = true;
+    int32 Connected = 0;
+    while (!Pending.IsEmpty())
+    {
+        const FIntPoint Cell = Pending.Pop(EAllowShrinking::No);
+        ++Connected;
+        const FIntPoint Steps[] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+        for (const FIntPoint Step : Steps)
+        {
+            const FIntPoint Next = Cell + Step;
+            if (Next.X < 0 || Next.X >= FTrapMaze::Grid || Next.Y < 0 || Next.Y >= FTrapMaze::Grid
+                || Seen[Next.X][Next.Y] || Maze.bTrap[Next.X][Next.Y])
+            {
+                continue;
+            }
+            Seen[Next.X][Next.Y] = true;
+            Pending.Add(Next);
+        }
+    }
+    TestEqual(TEXT("Safe cells form one path"), Connected, SafeCount);
+    FTrapMaze SeededAgain;
+    const bool bSameSeed = BuildTrapMaze(7, 0b0101, 120.0, 120.0, 240.0, SeededAgain);
+    TestTrue(TEXT("The same seed builds the same hidden traps"), bSameSeed
+        && FMemory::Memcmp(Maze.bTrap, SeededAgain.bTrap, sizeof(Maze.bTrap)) == 0);
     return true;
 }
 #endif

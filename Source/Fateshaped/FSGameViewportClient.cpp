@@ -1,10 +1,13 @@
 #include "FSGameViewportClient.h"
 
 #include "AudioDevice.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "Engine/Console.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/GameUserSettings.h"
 #include "GameFramework/PlayerController.h"
@@ -73,8 +76,8 @@ public:
         ChildSlot
         [
             SNew(SBorder).BorderImage(WhiteBrush)
-            .BorderBackgroundColor(FLinearColor(0.009f, 0.011f, 0.014f, 1.0f))
-            .HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(24)
+            .BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.0f))
+            .HAlign(HAlign_Left).VAlign(VAlign_Center).Padding(FMargin(72, 48))
             [
                 SNew(SScaleBox).Stretch(EStretch::ScaleToFit).StretchDirection(EStretchDirection::DownOnly)
                 [
@@ -458,6 +461,7 @@ bool UFSGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
 void UFSGameViewportClient::DetachViewportClient()
 {
     SaveMasterVolume();
+    ClearMenuView();
     PauseMenu.Reset();
     MainMenu.Reset();
     PausedPlayer.Reset();
@@ -466,6 +470,7 @@ void UFSGameViewportClient::DetachViewportClient()
 
 void UFSGameViewportClient::OpenMainMenu(APlayerController& Player)
 {
+    FrameExitPortal(Player);
     MainMenu = SNew(SFSMainMenu)
         .OnStart(FSimpleDelegate::CreateUObject(this, &UFSGameViewportClient::StartGame))
         .OnQuit(FSimpleDelegate::CreateUObject(this, &UFSGameViewportClient::QuitGame));
@@ -478,6 +483,80 @@ void UFSGameViewportClient::OpenMainMenu(APlayerController& Player)
     CaptureMenuInput(Player, MainMenu->GetInitialFocus());
 }
 
+void UFSGameViewportClient::FrameExitPortal(APlayerController& Player)
+{
+    UWorld* MenuWorld = Player.GetWorld();
+    if (!MenuWorld) return;
+
+    AActor* Portal = nullptr;
+    int32 BestScore = 0;
+    for (TActorIterator<AActor> Actor(MenuWorld); Actor; ++Actor)
+    {
+        const bool bTagged = Actor->ActorHasTag(TEXT("QuestPortal"));
+        const bool bNamed = Actor->GetName().Contains(TEXT("QuestPortal"));
+        if (!bTagged && !bNamed) continue;
+        int32 Score = (bTagged ? 4 : 0) + (bNamed ? 2 : 0);
+        if (Actor->GetName().Contains(TEXT("QuestPortal2"))) Score -= 1;
+        if (Score > BestScore)
+        {
+            BestScore = Score;
+            Portal = *Actor;
+        }
+    }
+    if (!Portal)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Startup menu could not find the Guild exit portal."));
+        return;
+    }
+
+    FVector Origin = FVector::ZeroVector;
+    FVector Extent = FVector::ZeroVector;
+    Portal->GetActorBounds(false, Origin, Extent);
+    const FVector Focus = Origin + FVector(0, 0, Extent.Z * 0.12);
+    const FVector FromSpawn = Player.GetPawn() ? Focus - Player.GetPawn()->GetActorLocation() : Portal->GetActorForwardVector();
+    const FVector Approach = FromSpawn.GetSafeNormal2D().IsNearlyZero() ? FVector(1, 0, 0) : FromSpawn.GetSafeNormal2D();
+    const FVector Right = FVector::CrossProduct(FVector::UpVector, Approach);
+    const double Distance = FMath::Clamp(FMath::Max3(Extent.X, Extent.Y, 180.0) * 3.4, 460.0, 1200.0);
+    // Shift the camera left so the portal sits in the open right side of the frame.
+    const FVector CameraLocation = Focus - Approach * Distance - Right * Distance * 0.3 + FVector(0, 0, 120);
+
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    ACameraActor* Camera = MenuWorld->SpawnActor<ACameraActor>(CameraLocation, (Focus - CameraLocation).Rotation(), Params);
+    if (!Camera) return;
+    if (UCameraComponent* Component = Camera->GetCameraComponent())
+    {
+        Component->SetFieldOfView(62.0f);
+        Component->bConstrainAspectRatio = false;
+    }
+    Player.SetViewTarget(Camera);
+    MenuCamera = Camera;
+    if (APawn* Pawn = Player.GetPawn())
+    {
+        HiddenMenuPawn = Pawn;
+        bMenuPawnWasHidden = Pawn->IsHidden();
+        Pawn->SetActorHiddenInGame(true);
+    }
+}
+
+void UFSGameViewportClient::ClearMenuView()
+{
+    if (APlayerController* Player = PausedPlayer.Get())
+    {
+        if (APawn* Pawn = HiddenMenuPawn.Get())
+        {
+            Pawn->SetActorHiddenInGame(bMenuPawnWasHidden);
+            Player->SetViewTarget(Pawn);
+        }
+    }
+    if (ACameraActor* Camera = MenuCamera.Get())
+    {
+        Camera->Destroy();
+    }
+    MenuCamera.Reset();
+    HiddenMenuPawn.Reset();
+}
+
 void UFSGameViewportClient::StartGame()
 {
     if (!MainMenu) return;
@@ -487,6 +566,7 @@ void UFSGameViewportClient::StartGame()
     {
         if (AHUD* HUD = Player->GetHUD()) HUD->bShowHUD = bPreviousShowHUD;
     }
+    ClearMenuView();
     RestoreGameInput();
 }
 

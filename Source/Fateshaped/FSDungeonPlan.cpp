@@ -676,4 +676,100 @@ bool Generate(int32 Seed, FPlan& OutPlan)
     }
     return bFound;
 }
+
+bool BuildTrapMaze(int32 Seed, uint8 Openings, double CellX, double CellY, double DoorWidth, FTrapMaze& OutMaze)
+{
+    constexpr int32 Grid = FTrapMaze::Grid;
+    constexpr int32 Passage = Grid / 2;
+    for (int32 Y = 0; Y < Grid; ++Y)
+    {
+        for (int32 X = 0; X < Grid; ++X) OutMaze.bTrap[X][Y] = true;
+    }
+
+    bool HorizontalWall[Passage + 1][Passage];
+    bool VerticalWall[Passage][Passage + 1];
+    for (int32 Y = 0; Y <= Passage; ++Y)
+    {
+        for (int32 X = 0; X < Passage; ++X) HorizontalWall[Y][X] = true;
+    }
+    for (int32 Y = 0; Y < Passage; ++Y)
+    {
+        for (int32 X = 0; X <= Passage; ++X) VerticalWall[Y][X] = true;
+    }
+
+    FRandomStream Random(Seed);
+    bool Seen[Passage][Passage] = {};
+    TArray<FIntPoint, TInlineAllocator<Passage * Passage>> Walk;
+    const FIntPoint Start(Random.RandRange(0, Passage - 1), Random.RandRange(0, Passage - 1));
+    Seen[Start.X][Start.Y] = true;
+    Walk.Add(Start);
+    int32 Visited = 1;
+    while (!Walk.IsEmpty() && Visited < Passage * Passage)
+    {
+        const FIntPoint Current = Walk.Last();
+        int32 Choices[4];
+        int32 ChoiceCount = 0;
+        for (int32 Direction = 0; Direction < UE_ARRAY_COUNT(Directions); ++Direction)
+        {
+            const FIntPoint Next = Current + Directions[Direction];
+            if (Next.X >= 0 && Next.X < Passage && Next.Y >= 0 && Next.Y < Passage && !Seen[Next.X][Next.Y])
+            {
+                Choices[ChoiceCount++] = Direction;
+            }
+        }
+        if (ChoiceCount == 0)
+        {
+            Walk.Pop();
+            continue;
+        }
+        const int32 Direction = Choices[Random.RandRange(0, ChoiceCount - 1)];
+        const FIntPoint Next = Current + Directions[Direction];
+        if (Direction == 0) VerticalWall[Current.Y][Current.X + 1] = false;
+        else if (Direction == 1) HorizontalWall[Current.Y + 1][Current.X] = false;
+        else if (Direction == 2) VerticalWall[Current.Y][Current.X] = false;
+        else HorizontalWall[Current.Y][Current.X] = false;
+        Seen[Next.X][Next.Y] = true;
+        Walk.Add(Next);
+        ++Visited;
+    }
+
+    for (int32 Y = 0; Y < Passage; ++Y)
+    {
+        for (int32 X = 0; X < Passage; ++X)
+        {
+            OutMaze.bTrap[X * 2 + 1][Y * 2 + 1] = false;
+            if (X + 1 < Passage && !VerticalWall[Y][X + 1]) OutMaze.bTrap[X * 2 + 2][Y * 2 + 1] = false;
+            if (Y + 1 < Passage && !HorizontalWall[Y + 1][X]) OutMaze.bTrap[X * 2 + 1][Y * 2 + 2] = false;
+        }
+    }
+
+    const double SpanX = CellX * Grid;
+    const double SpanY = CellY * Grid;
+    const auto OverlapsDoor = [](int32 Index, double Cell, double Span, double Width)
+    {
+        const double Start = Index * Cell;
+        const double DoorMin = (Span - Width) * 0.5;
+        return Start + Cell > DoorMin + 1.0 && Start < DoorMin + Width - 1.0;
+    };
+    const auto Tunnel = [&OutMaze](int32 X, int32 Y, int32 StepX, int32 StepY)
+    {
+        for (int32 Step = 0; Step < Grid; ++Step)
+        {
+            const bool bAlreadySafe = !OutMaze.bTrap[X][Y];
+            OutMaze.bTrap[X][Y] = false;
+            if (bAlreadySafe) return;
+            X += StepX;
+            Y += StepY;
+            if (X < 0 || Y < 0 || X >= Grid || Y >= Grid) return;
+        }
+    };
+    for (int32 Index = 0; Index < Grid; ++Index)
+    {
+        if ((Openings & 0b0001) && OverlapsDoor(Index, CellY, SpanY, DoorWidth)) Tunnel(Grid - 1, Index, -1, 0);
+        if ((Openings & 0b0100) && OverlapsDoor(Index, CellY, SpanY, DoorWidth)) Tunnel(0, Index, 1, 0);
+        if ((Openings & 0b0010) && OverlapsDoor(Index, CellX, SpanX, DoorWidth)) Tunnel(Index, Grid - 1, 0, -1);
+        if ((Openings & 0b1000) && OverlapsDoor(Index, CellX, SpanX, DoorWidth)) Tunnel(Index, 0, 0, 1);
+    }
+    return Visited == Passage * Passage;
+}
 }
