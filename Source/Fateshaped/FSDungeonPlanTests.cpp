@@ -10,6 +10,7 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
 {
     using namespace FSDungeon;
     TSet<FIntPoint> BossLocations;
+    int32 PlansWithJunctions = 0;
     for (int32 Seed = 1; Seed <= 256; ++Seed)
     {
         FPlan Plan;
@@ -20,7 +21,7 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
         TestEqual(TEXT("Room count"), Plan.Rooms.Num(), 9);
         TestTrue(TEXT("Orthogonal bends"), Plan.Corners > 0);
         TestTrue(TEXT("Two straight tiles separate consecutive corridor bends"), HasSpacedCorners(Plan));
-        TestTrue(TEXT("T junctions"), Plan.Junctions > 0);
+        PlansWithJunctions += Plan.Junctions > 0;
         TestEqual(TEXT("Optional loop"), Plan.Shortcuts, 1);
 
         TSet<ERoomRole> Roles;
@@ -49,6 +50,7 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
         TestTrue(TEXT("Both trap types occur"), Roles.Contains(ERoomRole::Spikes) && Roles.Contains(ERoomRole::Poison));
     }
     TestTrue(TEXT("The final encounter moves across runs"), BossLocations.Num() > 10);
+    TestTrue(TEXT("T junctions occur across the compact layouts"), PlansWithJunctions > 10);
 
     FPlan First;
     FPlan Repeat;

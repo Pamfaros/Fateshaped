@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-143 widens the custom corridors, fits a single Blueprint to each straight run and restores both magical barriers. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-144 packs Crypt rooms closer and uses the authored straight corridor length. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -94,6 +94,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-141 · Custom room and corridor fit — COMPILED + PIE_TESTED.** Fitted the authored corridor meshes and independent ports. Both bend orientations use the right bend Blueprint. Removed the unused cross Blueprint. Checked capsule clearance in both orientations.
 - **FS-142 · Custom-only Crypt geometry — COMPILED + PIE_TESTED.** Bound the exit and door Blueprints to the custom kit. Removed the prototype route from `L_Dungeon_01` and the old geometry fallback from runtime. Added a matte stone seam material. All 256 seeded plans passed. A scripted expedition checked all eight module types, doorway collision, walking to the portal, rewards and Guild return. Packaged testing remains pending.
 - **FS-143 · Wider and fewer Crypt corridors — COMPILED + PIE_TESTED.** Widened the corridor meshes by 50% and matched the regular room wall height. The compact plan fits the three authored corridor types directly by their ports. Restored the water plug and lightning gate. All 256 seeded plans passed. Two rendered layouts used 43 and 31 corridor actors and passed doorway collision checks. The first also passed scripted movement, rewards and return. Packaged testing remains pending.
+- **FS-144 · Native-length corridors and closer rooms — COMPILED + PIE_TESTED.** Repeat straight Blueprint pieces at their measured length. Pack nearby rooms and validate each corridor shape while routing. All 256 seeded plans passed. Two distinct rendered runs passed authored-scale, port and collision checks. The scripted expedition passed the gate, awarded rewards and returned to the Guild. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 

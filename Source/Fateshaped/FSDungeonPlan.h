@@ -26,6 +26,7 @@ struct FPlan
 {
     TArray<FRoom> Rooms;
     TSet<FIntPoint> Corridors;
+    TSet<FIntPoint> DirectRoomDoors;
     TSet<FIntPoint> Tiles;
     FIntPoint GateTile = FIntPoint::ZeroValue;
     FIntPoint ExitDirection = FIntPoint::ZeroValue;

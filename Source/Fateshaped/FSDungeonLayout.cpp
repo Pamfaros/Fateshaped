@@ -19,6 +19,7 @@
 namespace
 {
 constexpr double DoorWidth = 240.0;
+constexpr double CorridorJoinOverlap = 12.0;
 using FSDungeon::ERoomRole;
 using FSDungeon::FRoom;
 const FName LayoutAttemptedTag(TEXT("FS_DungeonLayoutAttempted"));
@@ -225,6 +226,9 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
 {
     FVector2D Extents[WallPlug];
     FVector StraightMouths[2]{FVector::ZeroVector, FVector::ZeroVector};
+    FVector ExitMouth = FVector::ZeroVector;
+    double RoomReach = 0.0;
+    double JunctionReach = 0.0;
     // Measure the actual component hierarchy without using visual mesh bounds.
     for (int32 Shape = NormalRoom; Shape < WallPlug; ++Shape)
     {
@@ -251,22 +255,29 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
             {
                 StraightMouths[Side / 2] = Position;
             }
+            else if (Shape == ExitRoom && Side == 0)
+            {
+                ExitMouth = Position;
+            }
         }
         Probe->Destroy();
         SpawnedModules.Pop();
-        if (Shape != Straight)
-        {
-            TilePitch = FMath::Max(TilePitch, FMath::Max(Extents[Shape].X, Extents[Shape].Y));
-        }
+        const double Reach = FMath::Max(Extents[Shape].X, Extents[Shape].Y);
+        if (Shape < Straight) RoomReach = FMath::Max(RoomReach, Reach);
+        else if (Shape != Straight) JunctionReach = FMath::Max(JunctionReach, Reach);
     }
-    // Room centers reserve a 3-by-3 footprint. Turns and junctions have at least one straight cell between them.
-    TilePitch += 110.0;
     const FVector LocalSpan = StraightMouths[0] - StraightMouths[1];
-    if (LocalSpan.X <= UE_SMALL_NUMBER || !FMath::IsNearlyZero(LocalSpan.Y, 0.1)
+    if (LocalSpan.X <= CorridorJoinOverlap || !FMath::IsNearlyZero(LocalSpan.Y, 0.1)
         || !FMath::IsNearlyZero(LocalSpan.Z, 0.1))
     {
         return false;
     }
+    // The nearest room pair is three cells apart. A room and turn or two turns can be two cells apart.
+    const double MinimumPassage = 0.4 * LocalSpan.X;
+    const double RoomPairPitch = (2.0 * RoomReach + MinimumPassage) / 3.0;
+    const double MixedPairPitch = (RoomReach + JunctionReach + MinimumPassage) * 0.5;
+    const double JunctionPairPitch = JunctionReach + MinimumPassage * 0.5;
+    TilePitch = FMath::Max(FMath::Max(LocalSpan.X, RoomPairPitch), FMath::Max(MixedPairPitch, JunctionPairPitch));
 
     TMap<FIntVector, FTransform> Ports;
     const auto SpawnFittedModule = [&](int32 Shape, const FQuat& Rotation, const FVector& Location, const FVector& Scale)
@@ -281,12 +292,25 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         return SpawnFittedModule(Shape, Port.GetRotation(), Port.GetLocation(), Scale);
     };
     const FRotator GateRotation = FVector(Plan.ExitDirection.X, Plan.ExitDirection.Y, 0).Rotation();
+    const FRoom* Boss = Plan.Rooms.FindByPredicate([](const FRoom& Room) { return Room.Role == ERoomRole::Boss; });
+    if (!Boss) return false;
+    const int32 ExitSide = (FMath::RoundToInt(GateRotation.Yaw / 90.0) + 4) % 4;
     for (const FRoom& Room : Plan.Rooms)
     {
         const bool bExit = Room.Role == ERoomRole::Exit;
         const EModule Shape = bExit ? ExitRoom : Room.Role == ERoomRole::Boss ? BossRoom : NormalRoom;
         const double Yaw = bExit ? GateRotation.Yaw + 180 : 0;
-        AActor* Module = SpawnModule(Shape, FTransform(FRotator(0, Yaw, 0), TileCenter(Room.Center, TilePitch)));
+        const FRotator Rotation(0, Yaw, 0);
+        FVector Center = TileCenter(Room.Center, TilePitch);
+        if (bExit)
+        {
+            const FTransform* BossPort = Ports.Find(PortKey(FSDungeon::DoorTile(*Boss, Plan.ExitDirection), ExitSide));
+            if (!BossPort) return false;
+            const double ExitPassage = 2.0 * LocalSpan.X - 3.0 * CorridorJoinOverlap - 1.0;
+            Center = BossPort->GetLocation() + GateRotation.Vector() * ExitPassage - Rotation.RotateVector(ExitMouth);
+            Center.Z = 0.0;
+        }
+        AActor* Module = SpawnModule(Shape, FTransform(Rotation, Center));
         if (!Module) return false;
         RoomExtents.Add(Extents[Shape]);
         if (bExit)
@@ -296,10 +320,10 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
             ExitCenter = ExitPoint->GetComponentLocation();
         }
         const uint8 Openings = FSDungeon::RoomOpenings(Plan, Room);
-        const int32 Rotation = (FMath::RoundToInt(Yaw / 90.0) % 4 + 4) % 4;
+        const int32 QuarterTurns = (FMath::RoundToInt(Yaw / 90.0) % 4 + 4) % 4;
         for (int32 Index = 0; Index < UE_ARRAY_COUNT(DoorTags); ++Index)
         {
-            const int32 Side = (Index + Rotation) % 4;
+            const int32 Side = (Index + QuarterTurns) % 4;
             const USceneComponent* Door = FindModulePoint(*Module, DoorTags[Index]);
             if (!Door) return false;
             const FTransform Port = Door->GetComponentTransform();
@@ -352,20 +376,24 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         }
     }
 
-    int32 StraightRuns = 0;
-    const auto FitStraight = [&](const FTransform& StartPort, const FTransform& EndPort, FIntPoint Direction)
+    int32 StraightPieces = 0;
+    const auto PlaceStraightRun = [&](const FTransform& StartPort, const FTransform& EndPort, FIntPoint Direction)
     {
         const FVector Start = StartPort.GetLocation();
         const FVector Span = EndPort.GetLocation() - Start;
         if (FVector::DotProduct(Span, FVector(Direction.X, Direction.Y, 0)) <= 0.0) return false;
-        // Overlap uneven mouth edges so the authored collision remains continuous.
-        constexpr double MouthOverlap = 22.0;
+        const double Distance = Span.Size();
+        const int32 PieceCount = FMath::Max(1, FMath::CeilToInt((Distance + CorridorJoinOverlap) / (LocalSpan.X - CorridorJoinOverlap)));
+        // Spread the rounding difference across joints. Every piece keeps its authored length.
+        const double Overlap = (PieceCount * LocalSpan.X - Distance) / (PieceCount + 1);
         const FVector Axis = Span.GetSafeNormal();
-        const FVector Scale((Span.Size() + 2.0 * MouthOverlap) / LocalSpan.X, 1, 1);
         const FQuat Rotation = FRotationMatrix::MakeFromXZ(Axis, FVector::UpVector).ToQuat();
-        const FVector Origin = Start - Axis * MouthOverlap - Rotation.RotateVector(StraightMouths[1] * Scale);
-        if (!SpawnFittedModule(Straight, Rotation, Origin, Scale)) return false;
-        ++StraightRuns;
+        const FVector Origin = Start - Axis * Overlap - Rotation.RotateVector(StraightMouths[1]);
+        for (int32 Index = 0; Index < PieceCount; ++Index)
+        {
+            if (!SpawnModule(Straight, FTransform(Rotation, Origin + Axis * ((LocalSpan.X - Overlap) * Index)))) return false;
+        }
+        StraightPieces += PieceCount;
         return true;
     };
     for (const FIntPoint Tile : Plan.Corridors)
@@ -385,7 +413,7 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
 
         const FTransform* StartPort = Ports.Find(PortKey(Tile - Direction, Side));
         const FTransform* EndPort = Ports.Find(PortKey(End, (Side + 2) % 4));
-        if (!StartPort || !EndPort || !FitStraight(*StartPort, *EndPort, Direction)) return false;
+        if (!StartPort || !EndPort || !PlaceStraightRun(*StartPort, *EndPort, Direction)) return false;
     }
     // A route can bend at its first cell outside a room. Fit the same authored straight to that short span.
     for (const auto& Entry : Ports)
@@ -396,10 +424,11 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         const FIntPoint Direction = FSDungeon::Directions[Side];
         if (const FTransform* Mate = Ports.Find(PortKey(Tile + Direction, (Side + 2) % 4)))
         {
-            if (!FitStraight(Entry.Value, *Mate, Direction)) return false;
+            if (!PlaceStraightRun(Entry.Value, *Mate, Direction)) return false;
         }
     }
-    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt fitted %.1f cm grid spacing and %d straight corridor modules."), TilePitch, StraightRuns);
+    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt used %.1f cm spacing and %d straight corridor modules with %.1f cm native length."),
+        TilePitch, StraightPieces, LocalSpan.X);
     return true;
 }
 
@@ -410,9 +439,10 @@ bool AFSDungeonLayout::Build(int32 RunId)
         return false;
     }
     FSDungeon::FPlan Plan;
-    if (!FSDungeon::Generate(RunId, Plan) && !FSDungeon::Generate(1, Plan))
+    if (!FSDungeon::Generate(RunId, Plan))
     {
-        return false;
+        if (!FSDungeon::Generate(1, Plan)) return false;
+        UE_LOG(LogTemp, Warning, TEXT("Forgotten Crypt run %d used fallback plan seed 1."), RunId);
     }
 
     TArray<FVector2D> RoomExtents;
