@@ -8,6 +8,7 @@ inline const FIntPoint Directions[] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
 inline const FIntPoint NormalHalfSize(2, 2);
 inline const FIntPoint BossHalfSize(3, 3);
 inline const FIntPoint ExitHalfSize(1, 1);
+inline constexpr int32 MinStraightTilesBetweenCorners = 2;
 
 enum class ERoomRole : uint8
 {
@@ -36,5 +37,6 @@ struct FPlan
 FIntPoint DoorTile(const FRoom& Room, FIntPoint Direction);
 uint8 RoomOpenings(const FPlan& Plan, const FRoom& Room);
 uint8 CorridorOpenings(const FPlan& Plan, FIntPoint Tile);
+bool HasSpacedCorners(const FPlan& Plan);
 bool Generate(int32 Seed, FPlan& OutPlan);
 }

@@ -39,10 +39,39 @@ uint8 CorridorOpenings(const FPlan& Plan, FIntPoint Tile)
     return Openings;
 }
 
+bool HasSpacedCorners(const FPlan& Plan)
+{
+    const auto IsCorner = [](uint8 Ports)
+    {
+        return FMath::CountBits(static_cast<uint32>(Ports)) == 2 && Ports != 0b0101 && Ports != 0b1010;
+    };
+    for (FIntPoint Tile : Plan.Corridors)
+    {
+        const uint8 Ports = CorridorOpenings(Plan, Tile);
+        if (!IsCorner(Ports)) continue;
+        for (int32 Side = 0; Side < UE_ARRAY_COUNT(Directions); ++Side)
+        {
+            if (!(Ports & (1 << Side))) continue;
+            const uint8 StraightPorts = (1 << Side) | (1 << ((Side + 2) % 4));
+            for (int32 Step = 1; Step <= MinStraightTilesBetweenCorners; ++Step)
+            {
+                const FIntPoint Next = Tile + Directions[Side] * Step;
+                if (!Plan.Corridors.Contains(Next)) break;
+                const uint8 NextPorts = CorridorOpenings(Plan, Next);
+                if (IsCorner(NextPorts)) return false;
+                if (NextPorts != StraightPorts) break;
+            }
+        }
+    }
+    return true;
+}
+
 namespace
 {
 constexpr int32 RoomCount = 8;
 constexpr int32 RoomMargin = 3;
+constexpr int32 MaxRouteBends = 4;
+constexpr int32 StepsBetweenBends = MinStraightTilesBetweenCorners + 1;
 
 struct FEdge
 {
@@ -259,46 +288,71 @@ bool CanCarve(const FPlan& Plan, const TArray<FIntPoint>& Path, const FRoomTiles
 TArray<FIntPoint> RouteBetweenPorts(const FPlan& Plan, const FRoomTiles& RoomTiles,
     const TSet<FIntPoint>& Reserved, int32 A, int32 B, const FIntPoint* Junction = nullptr)
 {
-    TSet<FIntPoint> Goals;
-    TArray<FIntPoint> Queue;
-    TMap<FIntPoint, FIntPoint> Previous;
-    for (FIntPoint Side : Directions)
+    struct FStep
     {
+        FIntPoint Tile;
+        int32 Side;
+        int32 StraightSteps;
+        int32 Bends;
+        int32 Parent;
+
+        FIntVector Key() const
+        {
+            return {Tile.X, Tile.Y, ((Bends * (StepsBetweenBends + 1) + StraightSteps) * 4) + Side};
+        }
+    };
+    TMap<FIntPoint, int32> Goals;
+    TArray<FStep> Queue;
+    TSet<FIntVector> Seen;
+    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Directions); ++Index)
+    {
+        const FIntPoint Side = Directions[Index];
         const FIntPoint Start = DoorTile(Plan.Rooms[A], Side) + Side;
         if (CanCarveTile(Plan, RoomTiles, Reserved, Start, A, B, nullptr))
         {
-            Queue.Add(Start);
-            Previous.Add(Start, Start);
+            const FStep& Step = Queue.Add_GetRef({Start, Index, StepsBetweenBends, 0, INDEX_NONE});
+            Seen.Add(Step.Key());
         }
-        Goals.Add(Junction ? *Junction + Side : DoorTile(Plan.Rooms[B], Side) + Side);
+        Goals.Add(Junction ? *Junction + Side : DoorTile(Plan.Rooms[B], Side) + Side, (Index + 2) % 4);
     }
     for (int32 Index = 0; Index < Queue.Num(); ++Index)
     {
-        FIntPoint Tile = Queue[Index];
-        if (Goals.Contains(Tile))
+        const FStep Step = Queue[Index];
+        const auto CanContinue = [&](int32 Side)
         {
-            TArray<FIntPoint> Path;
-            if (Junction) Path.Add(*Junction);
-            Path.Add(Tile);
-            while (Previous[Tile] != Tile)
+            return Side == Step.Side || (Side != (Step.Side + 2) % 4
+                && Step.StraightSteps == StepsBetweenBends && Step.Bends < MaxRouteBends);
+        };
+        if (const int32* ExitSide = Goals.Find(Step.Tile))
+        {
+            if (CanContinue(*ExitSide))
             {
-                Tile = Previous[Tile];
-                Path.Add(Tile);
+                TArray<FIntPoint> Path;
+                if (Junction) Path.Add(*Junction);
+                for (int32 Node = Index; Node != INDEX_NONE; Node = Queue[Node].Parent)
+                {
+                    Path.Add(Queue[Node].Tile);
+                }
+                Algo::Reverse(Path);
+                return Path;
             }
-            Algo::Reverse(Path);
-            return Path;
+            continue;
         }
-        for (FIntPoint Side : Directions)
+        for (const int32 Side : {Step.Side, (Step.Side + 1) % 4, (Step.Side + 3) % 4})
         {
-            const FIntPoint Next = Tile + Side;
-            if (Next.X < -10 || Next.X > 41 || FMath::Abs(Next.Y) > 25 || Previous.Contains(Next)
+            if (!CanContinue(Side)) continue;
+            const FIntPoint Next = Step.Tile + Directions[Side];
+            const bool bBend = Side != Step.Side;
+            const FStep Candidate{Next, Side, bBend ? 1 : FMath::Min(StepsBetweenBends, Step.StraightSteps + 1),
+                Step.Bends + (bBend ? 1 : 0), Index};
+            if (Next.X < -10 || Next.X > 41 || FMath::Abs(Next.Y) > 25 || Seen.Contains(Candidate.Key())
                 || RoomTiles.Contains(Next)
                 || !CanCarveTile(Plan, RoomTiles, Reserved, Next, A, B, Goals.Contains(Next) ? Junction : nullptr))
             {
                 continue;
             }
-            Previous.Add(Next, Tile);
-            Queue.Add(Next);
+            Seen.Add(Candidate.Key());
+            Queue.Add(Candidate);
         }
     }
     return {};
@@ -525,7 +579,7 @@ bool Build(FRandomStream& Random, FPlan& Plan)
     }
 
     const TSet<FIntPoint> BeforeGate = Flood(Plan.Tiles, &Plan.GateTile);
-    if (Plan.Corners == 0 || Plan.Junctions == 0 || BeforeGate.Contains(Plan.Rooms.Last().Center)
+    if (Plan.Corners == 0 || Plan.Junctions == 0 || !HasSpacedCorners(Plan) || BeforeGate.Contains(Plan.Rooms.Last().Center)
         || Flood(Plan.Tiles).Num() != Plan.Tiles.Num())
     {
         return false;

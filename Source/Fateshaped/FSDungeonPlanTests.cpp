@@ -20,6 +20,7 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
         }
         TestEqual(TEXT("Room count"), Plan.Rooms.Num(), 9);
         TestTrue(TEXT("Orthogonal bends"), Plan.Corners > 0);
+        TestTrue(TEXT("Two straight tiles separate consecutive corridor bends"), HasSpacedCorners(Plan));
         TestTrue(TEXT("T junctions"), Plan.Junctions > 0);
         TestEqual(TEXT("Optional loop"), Plan.Shortcuts, 1);
 
