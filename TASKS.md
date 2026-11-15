@@ -1,9 +1,12 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-149 archives the current Windows build and verifies Guild startup. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-150 animation-driven player actions: COMPILED + PIE_TESTED (scripted). **Next P0:** rebuild the Windows package with FS-150, complete a normal-input expedition through Gerald and verify reward persistence after relaunch.
+
+**FS-150 checkpoint:** the owner explicitly authorized a local commit and GitHub push before packaged validation. The checkpoint scope excludes the pre-existing mannequin, roll, Guild and staged RoundShield edits.
 
 - **Essence shimmer — COMPILED, Niagara editor preview observed.** `/Game/VFX/NS_Essences` with `/Game/VFX/M_Essences` spawns a local-space mote cloud that cycles red, yellow, and blue. It is not placed in a level. PIE and the Windows package are **NOT_TESTED**.
-- **Roll jump lock — COMPILED.** Evade, including the S/M roll, sets `JumpMaxCount` to 0 until the action ends and clears a held jump. PIE is **NOT_TESTED**.
+- **FS-150 · Animation-driven actions — COMPILED + PIE_TESTED.** Shared montage-instance lifecycle, action-set asset and 22 authored montages replace action-end clocks and fixed combat/travel windows. Notify states drive contact, immunity, movement locks, charge and combo transitions; cue events commit casts once. Warrior moves after the hit phase, chains attacks through the combo window, and releases roll/jump locks with actual playback. All 28 lifecycle and 13 combat cases passed; scripted contract rewards, Guild return and a new-PIE save reload passed. See DEVLOG and `Docs/AnimatedActions.md`. Restart the main editor to load the rebuilt native DLL. Normal device input and the updated Windows package are **NOT_TESTED**.
+- **Roll jump lock — PIE_TESTED (FS-150).** Shift evade holds `JumpMaxCount` at 0 during playback and restores the original value on completion, interruption and death.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 

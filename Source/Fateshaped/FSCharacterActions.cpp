@@ -1,4 +1,6 @@
 #include "FSCharacterActions.h"
+#include "FSAnimatedAction.h"
+#include "FSClassCombat.h"
 #include "FSCryptEnemy.h"
 
 #include "Animation/AnimInstance.h"
@@ -10,13 +12,10 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/RootMotionSource.h"
 #include "Kismet/GameplayStatics.h"
 
 namespace
 {
-constexpr float DodgeSeconds = 0.22f;
-constexpr double DodgeDistance = 340.0;
 constexpr double WaveRange = 850.0;
 constexpr double WaveHalfWidth = 170.0;
 const FName PracticeTag(TEXT("PracticeTarget"));
@@ -81,44 +80,23 @@ void UFSCharacterActions::PlayActionAnimation(ACharacter* Character, UAnimSequen
     {
         if (UAnimInstance* Instance = Character->GetMesh()->GetAnimInstance())
         {
-            UAnimMontage* Montage = Instance->PlaySlotAnimationAsDynamicMontage(Animation, TEXT("DefaultSlot"), 0.05f, 0.12f, Rate);
-            if (FAnimMontageInstance* Action = Montage ? Instance->GetActiveInstanceForMontage(Montage) : nullptr)
+            auto* Driver = Character->FindComponentByClass<UFSAnimatedAction>();
+            if (!Driver)
             {
-                Action->PushDisableRootMotion();
+                Driver = NewObject<UFSAnimatedAction>(Character, TEXT("FSAnimatedAction"));
+                Driver->RegisterComponent();
             }
+            UAnimMontage* Montage = Cast<UAnimMontage>(Animation);
+            if (!Montage) Montage = UAnimMontage::CreateSlotAnimationAsDynamicMontage(Animation, TEXT("DefaultSlot"), 0.05f, 0.0f);
+            Driver->PlayMontage(TEXT("Reaction"), Montage, Rate);
         }
     }
 }
 
 void UFSCharacterActions::BeginDodge(ACharacter* Character)
 {
-    if (!Character)
-    {
-        return;
-    }
-    UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
-    FVector Direction = Character->GetPendingMovementInputVector().GetSafeNormal2D();
-    if (Direction.IsNearlyZero())
-    {
-        Direction = Movement->GetCurrentAcceleration().GetSafeNormal2D();
-    }
-    if (Direction.IsNearlyZero())
-    {
-        Direction = CameraHeading(Character);
-    }
-    Character->SetActorRotation(Direction.Rotation());
-
-    // CharacterMovement sweeps the capsule and preserves gravity during the dash.
-    TSharedPtr<FRootMotionSource_ConstantForce> Dash = MakeShared<FRootMotionSource_ConstantForce>();
-    Dash->InstanceName = TEXT("FS_Dodge");
-    Dash->Priority = 10;
-    Dash->AccumulateMode = ERootMotionAccumulateMode::Override;
-    Dash->Settings.SetFlag(ERootMotionSourceSettingsFlags::IgnoreZAccumulate);
-    Dash->Duration = DodgeSeconds;
-    Dash->Force = Direction * (DodgeDistance / DodgeSeconds);
-    Dash->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::ClampVelocity;
-    Dash->FinishVelocityParams.ClampVelocity = FMath::Min(Movement->MaxWalkSpeed, 200.0f);
-    Movement->ApplyRootMotionSource(Dash);
+    // Preserve the old Blueprint entry point without maintaining a second timed dodge implementation.
+    UFSClassBridge::ClassEvade(Character);
 }
 
 bool UFSCharacterActions::HasClearStrike(const AActor* Attacker, const AActor* Target)

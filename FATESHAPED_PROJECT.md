@@ -425,6 +425,7 @@ Use Enhanced Input where already available. Input prompts must be consistent wit
 - Successful hits produce sound, short effects, and visible enemy HP/reaction feedback.
 - Dodging has a clear Stamina cost and controlled recovery timing.
 - Interrupted animations cannot leave the character permanently locked in an attack state.
+- Animated player actions finish with their montage instance. Contact, invulnerability, movement locks and combo phases use authored notify tracks; clip length, sequence RateScale and montage play rate determine actual timing. See [Animated actions](Docs/AnimatedActions.md) for the implemented authoring contract.
 - When Mana/Stamina is insufficient, the UI explains why an ability is unavailable.
 - Enemies must not deal invisible, untelegraphed damage.
 

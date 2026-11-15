@@ -1,6 +1,9 @@
 #include "FSClassCombat.h"
 
 #include "FSCharacterActions.h"
+#include "FSAnimatedAction.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "FSCryptEnemy.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSequence.h"
@@ -32,18 +35,6 @@ namespace
 constexpr int32 Basic = 0, Dodge = 1, First = 2, Second = 3;
 constexpr float SharedDodgeDistance = 340, BackstepDistance = 320;
 constexpr float SparkRange = 550;
-constexpr float BackstepImmunity = 0.55f, BackstepRecovery = 0.50f;
-constexpr float BackstepFallbackDuration = 0.97f;
-const TCHAR* AxeClip = TEXT("/Game/Fantasy_Pack/Animations/1With_Weapon/Anim_Warrior_Attack_1.Anim_Warrior_Attack_1");
-// const TCHAR* AxeClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack");
-const TCHAR* SwordClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01");
-const TCHAR* FollowClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02");
-const TCHAR* CastClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03.MM_Attack_03");
-const TCHAR* DashClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash.MM_Dash");
-const TCHAR* RollClip = TEXT("/Game/Combat/SharedAnimations/AN_FS_EvadeRoll.AN_FS_EvadeRoll");
-const TCHAR* LeapClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump.MM_Jump");
-constexpr float LeapStrikeStart = 0.18f, LeapContactOpen = 0.37f, LeapContactClose = 0.86f;
-constexpr float LeapStrikeBlendOut = 0.10f;
 constexpr float WardRadius = 175, WardHeight = 35, WardMaxCapacity = 42;
 constexpr float ThreadRecallRadius = 26;
 const FVector FollowShoulder(0, 55, 20);
@@ -187,6 +178,16 @@ ACharacter& UFSClassCombat::Player() const
 void UFSClassCombat::BeginPlay()
 {
     Super::BeginPlay();
+    AnimatedAction = Player().FindComponentByClass<UFSAnimatedAction>();
+    if (!AnimatedAction)
+    {
+        AnimatedAction = NewObject<UFSAnimatedAction>(&Player(), TEXT("FSAnimatedAction"));
+        AnimatedAction->RegisterComponent();
+    }
+    if (!AnimatedAction->ActionSet)
+        AnimatedAction->ActionSet = LoadObject<UFSActionSet>(nullptr, TEXT("/Game/Combat/Actions/DA_FS_PlayerActions.DA_FS_PlayerActions"));
+    AnimatedAction->OnActionEnded.AddDynamic(this, &UFSClassCombat::AnimationEnded);
+    AnimatedAction->OnWindowChanged.AddDynamic(this, &UFSClassCombat::AnimationWindowChanged);
     FWorldDelegates::OnWorldPostActorTick.AddUObject(this, &UFSClassCombat::EmitPendingSpark);
     FootstepSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/Sounds/SC_Footstep.SC_Footstep"));
     for (const TCHAR* Name : SharedIconNames)
@@ -223,6 +224,13 @@ void UFSClassCombat::BeginPlay()
 
 void UFSClassCombat::EndPlay(const EEndPlayReason::Type Reason)
 {
+    if (AnimatedAction)
+    {
+        AnimatedAction->OnActionEnded.RemoveDynamic(this, &UFSClassCombat::AnimationEnded);
+        AnimatedAction->OnWindowChanged.RemoveDynamic(this, &UFSClassCombat::AnimationWindowChanged);
+        AnimatedAction->CancelAction();
+    }
+    Finish();
     FWorldDelegates::OnWorldPostActorTick.RemoveAll(this);
     StopRumble();
     SetSelectionOpen(false);
@@ -409,7 +417,6 @@ void UFSClassCombat::UpdateDefeat(float DeltaTime)
     if (!bPlayedDefeat)
     {
         bPlayedDefeat = true;
-        DefeatAge = DefeatDuration = 0;
         StopRumble();
         Player().StopJumping();
         Player().ConsumeMovementInputVector();
@@ -419,17 +426,10 @@ void UFSClassCombat::UpdateDefeat(float DeltaTime)
         if (auto* Clip = LoadObject<UAnimSequence>(nullptr,
             TEXT("/Game/Combat/SharedAnimations/AN_FS_Anim_Warrior_Dead_1.AN_FS_Anim_Warrior_Dead_1")))
         {
-            DefeatDuration = Clip->GetPlayLength();
             Mesh->PlayAnimation(Clip, false);
         }
     }
-    const float End = DefeatAge + DeltaTime;
-    if (DefeatDuration > 0 && DefeatAge < DefeatDuration && End >= DefeatDuration)
-    {
-        Mesh->SetPosition(DefeatDuration, false);
-        Mesh->Stop();
-    }
-    DefeatAge = End;
+    // Single-node non-looping playback stops at its actual final pose, including RateScale.
 }
 
 void UFSClassCombat::PlayReaction(const TCHAR* Name)
@@ -464,41 +464,58 @@ void UFSClassCombat::StopRumble()
     RumbleHandle = 0;
 }
 
-void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
+bool UFSClassCombat::Start(EMove Next, FName Animation)
 {
+    // Finish the old action before its replacement starts. Old montage callbacks are generation-checked.
+    if (AnimatedAction) AnimatedAction->CancelAction();
+    Finish();
+    static const FName Names[] = {"Idle", "Axe", "Sword", "Dodge", "Leap", "ShieldHold", "ShieldStep",
+        "Spark", "OrbHold", "Orb", "StoneHold", "Stone", "Pivot", "Thread", "Recall", "PaidStand",
+        "Slip", "Wave", "Seal", "BendHold", "Bend"};
+    if (Animation.IsNone()) Animation = Names[static_cast<uint8>(Next)];
+    if (!AnimatedAction || !AnimatedAction->PlayAction(Animation))
+    {
+        Message(TEXT("Action animation unavailable"));
+        return false;
+    }
     Message(FString());
     Move = Next;
-    SetBasicAttackMovementLock(IsBasicAttacking());
-    Age = 0;
-    EndTime = End;
-    ActionClockRate = 1.0f;
     bCommitted = false;
     bHadTurnCue = false;
     HitActors.Reset();
     StrikePoint = FVector::ZeroVector;
     bHaveBladeSample = false;
     SetFlag(TEXT("bAttacking"), Next != EMove::Dodge);
-    SetFlag(TEXT("bDodging"), Next == EMove::Dodge);
+    SetFlag(TEXT("bDodging"), Phase(TEXT("Invulnerable")));
     SetDodgeJumpLock(Next == EMove::Dodge);
-    if (Clip)
-    {
-        if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, Clip))
-        {
-            PlayTimedAnimation(Animation, End);
-        }
-    }
+    SetBasicAttackMovementLock(Phase(TEXT("MoveLock")));
+    UFSCharacterActions::BeginAttackFacing(&Player());
     if (Next == EMove::ShieldHold || Next == EMove::StoneHold || Next == EMove::OrbHold || Next == EMove::BendHold)
-    {
-        UFSCharacterActions::BeginAttackFacing(&Player());
         PlaySound(TEXT("SFX_Swing"));
-    }
+    return true;
 }
 
-void UFSClassCombat::PlayTimedAnimation(UAnimSequenceBase* Animation, float Window)
+bool UFSClassCombat::Phase(FName Name) const
 {
-    // Keep the clip at its authored rate and stretch the action's contact and travel timeline with it.
-    ActionClockRate = Window / FMath::Max(Window, Animation->GetPlayLength());
-    UFSCharacterActions::PlayActionAnimation(&Player(), Animation, 1.0f);
+    return AnimatedAction && AnimatedAction->IsInPhase(Name);
+}
+
+void UFSClassCombat::AnimationWindowChanged(FName Name, bool bActive)
+{
+    if (Name == TEXT("Invulnerable")) SetFlag(TEXT("bDodging"), bActive);
+    if (Name == TEXT("MoveLock")) SetBasicAttackMovementLock(bActive);
+}
+
+void UFSClassCombat::AnimationEnded(FName, bool bInterrupted)
+{
+    if (bInterrupted && !AnimatedAction->IsActionActive())
+    {
+        bSparkPending = false;
+        bBufferedBasic = false;
+        StopRumble();
+        Finish();
+    }
+    // Natural completion is consumed after the final refreshed pose/hit window in TickAction.
 }
 
 void UFSClassCombat::SetDodgeJumpLock(bool bLocked)
@@ -508,7 +525,7 @@ void UFSClassCombat::SetDodgeJumpLock(bool bLocked)
     {
         if (!bDodgeJumpLocked)
         {
-            SavedJumpMaxCount = FMath::Max(1, Character.JumpMaxCount);
+            SavedJumpMaxCount = Character.JumpMaxCount;
             bDodgeJumpLocked = true;
         }
         Character.JumpMaxCount = 0;
@@ -523,7 +540,7 @@ void UFSClassCombat::SetDodgeJumpLock(bool bLocked)
 
 void UFSClassCombat::Finish()
 {
-    if (Move == EMove::Dodge) SetDodgeJumpLock(false);
+    SetDodgeJumpLock(false);
     if (Move == EMove::Leap)
     {
         auto* Movement = Player().GetCharacterMovement();
@@ -533,8 +550,7 @@ void UFSClassCombat::Finish()
     Move = EMove::Idle;
     SetBasicAttackMovementLock(false);
     DodgeSequence = nullptr;
-    MoveTime = 0;
-    MoveAge = 0;
+    bTravel = false;
     SetFlag(TEXT("bAttacking"), false);
     SetFlag(TEXT("bDodging"), false);
     LeapContactTarget.Reset();
@@ -544,13 +560,9 @@ void UFSClassCombat::Finish()
 void UFSClassCombat::Cancel()
 {
     bSparkPending = false;
+    bBufferedBasic = false;
     StopRumble();
-    Player().StopAnimMontage();
-    if (auto* Mesh = Player().GetMesh(); Mesh && Mesh->GetAnimInstance())
-    {
-        Mesh->GetAnimInstance()->Montage_Stop(0.06f);
-    }
-    BufferedBasicUntil = 0;
+    if (AnimatedAction) AnimatedAction->CancelAction();
     Finish();
 }
 
@@ -660,25 +672,30 @@ FVector UFSClassCombat::MoveInput(FVector Fallback) const
 
 bool UFSClassCombat::HasTravelFloor(const FVector& Target) const
 {
-    FCollisionQueryParams Query(SCENE_QUERY_STAT(FSClassMove), false, &Player());
-    FHitResult Floor;
-    return GetWorld()->LineTraceSingleByObjectType(Floor, Target, Target - FVector(0, 0, 220), Walls(), Query)
-        && Floor.ImpactNormal.Z >= Player().GetCharacterMovement()->GetWalkableFloorZ()
-        && Target.Z - Floor.ImpactPoint.Z <= Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + (Move == EMove::Leap ? 75 : 48);
+    // Match CharacterMovement's capsule support test. A single ray can hit a beveled floor tile edge
+    // and stop the same animation at different positions depending on frame rate.
+    FFindFloorResult Floor;
+    Player().GetCharacterMovement()->ComputeFloorDist(Target, 220, 220, Floor,
+        Player().GetCapsuleComponent()->GetScaledCapsuleRadius());
+    const bool bSafe = Floor.IsWalkableFloor() && Floor.FloorDist <= (Move == EMove::Leap ? 75 : 48);
+    if (!bSafe) UE_LOG(LogTemp, Verbose, TEXT("FS action floor rejected: actor=%s normal=%s target=%s impact=%s"),
+        *GetNameSafe(Floor.HitResult.GetActor()), *Floor.HitResult.ImpactNormal.ToString(), *Target.ToString(), *Floor.HitResult.ImpactPoint.ToString());
+    return bSafe;
 }
 
 bool UFSClassCombat::MovePlayer(const FVector& Offset, FHitResult& Hit)
 {
     if (Move != EMove::Dodge && !HasTravelFloor(Player().GetActorLocation() + Offset)) return false;
     Player().AddActorWorldOffset(Offset, true, &Hit);
+    if (Hit.bBlockingHit) UE_LOG(LogTemp, Verbose, TEXT("FS action travel blocked: actor=%s component=%s time=%.3f normal=%s"),
+        *GetNameSafe(Hit.GetActor()), *GetNameSafe(Hit.GetComponent()), Hit.Time, *Hit.ImpactNormal.ToString());
     return !Hit.bBlockingHit;
 }
 
-void UFSClassCombat::Travel(const FVector& Direction, float Distance, float Duration, float Arc)
+void UFSClassCombat::Travel(const FVector& Direction, float Distance, float Arc)
 {
     TravelHeading = Direction.GetSafeNormal2D();
-    MoveTime = Duration;
-    MoveAge = 0;
+    bTravel = true;
     MoveDistance = Distance;
     MoveArc = Arc;
     Player().GetCharacterMovement()->StopMovementImmediately();
@@ -687,19 +704,16 @@ void UFSClassCombat::Travel(const FVector& Direction, float Distance, float Dura
 void UFSClassCombat::Attack()
 {
     if (Unavailable() || bSelecting || !Branch() || !Grounded()) return;
-    if (Move == EMove::Slip && Age >= 0.25f)
+    if ((Move == EMove::Slip || IsBasicAttacking()) && Phase(TEXT("Combo")))
     {
-        BufferedBasicUntil = GetWorld()->GetTimeSeconds() + (EndTime - Age) / ActionClockRate + 0.20;
+        bBufferedBasic = true;
         return;
     }
     if (Move != EMove::Idle) return;
-    if (!Ready(Basic)) { Message(TEXT("Attack recovering")); return; }
     Heading = AimDirection();
     UFSCharacterActions::BeginAttackFacing(&Player());
     const EMove AttackMove = Branch() == 'V' ? EMove::Axe : Branch() == 'S' ? EMove::Sword : EMove::Spark;
-    Start(AttackMove, AttackMove == EMove::Axe ? 0.95f : AttackMove == EMove::Sword ? 0.52f : 0.38f,
-        AttackMove == EMove::Axe ? AxeClip : AttackMove == EMove::Sword ? SwordClip : CastClip);
-    Cooldown[Basic] = GetWorld()->GetTimeSeconds() + (AttackMove == EMove::Axe ? 1.20 : 0.65);
+    if (!Start(AttackMove)) return;
     PlaySound(TEXT("SFX_Swing"));
 }
 
@@ -709,27 +723,27 @@ void UFSClassCombat::Evade()
     const bool bCanCancel = Move == EMove::Idle || Move == EMove::Axe || Move == EMove::Sword || Move == EMove::ShieldHold
         || ((Move == EMove::OrbHold || (Move == EMove::Orb && !bCommitted)) && !bStepped)
         || Move == EMove::StoneHold || (Move == EMove::Thread && !bCommitted)
-        || (Move == EMove::Recall && !bCommitted) || (Move == EMove::Slip && Age >= 0.21f)
-        || (Move == EMove::Wave && (!bCommitted || Age >= 0.29f)) || (Move == EMove::Seal && !bCommitted)
+        || (Move == EMove::Recall && !bCommitted) || (Move == EMove::Slip && Phase(TEXT("Cancel")))
+        || (Move == EMove::Wave && (!bCommitted || Phase(TEXT("Cancel")))) || (Move == EMove::Seal && !bCommitted)
         || Move == EMove::BendHold || (Move == EMove::Bend && !bCommitted)
         || (Move == EMove::Spark && !bCommitted);
     if (!bCanCancel || !Spend(0, Branch() == 'S' || Class->Kit == EKit::SpellWeaver ? 25 : 0, 0)) return;
     const bool bBackstep = Branch() == 'V';
     const FVector Direction = MoveInput(bBackstep ? -Player().GetActorForwardVector() : AimDirection());
     Cancel();
-    Player().GetCharacterMovement()->bOrientRotationToMovement = false;
-    if (!bBackstep || FVector::DotProduct(Direction, Player().GetActorForwardVector()) > -0.8)
+    const FRotator Facing = Player().GetActorRotation();
+    if (!Start(EMove::Dodge, bBackstep ? TEXT("Backstep") : TEXT("Dodge"))) return;
+    Player().SetActorRotation(bBackstep && FVector::DotProduct(Direction, Facing.Vector()) <= -0.8 ? Facing : Direction.Rotation());
+    // Resolve the root curve from the assigned montage, so animation replacement needs no code edit.
+    if (const auto* Montage = AnimatedAction->GetActionMontage(); Montage && !Montage->SlotAnimTracks.IsEmpty())
     {
-        Player().SetActorRotation(Direction.Rotation());
+        const auto& Segments = Montage->SlotAnimTracks[0].AnimTrack.AnimSegments;
+        if (Segments.Num() == 1) DodgeSequence = Cast<UAnimSequence>(Segments[0].GetAnimReference());
     }
-    DodgeSequence = LoadObject<UAnimSequence>(nullptr, bBackstep ? DashClip : RollClip);
-    const float Duration = DodgeSequence ? DodgeSequence->GetPlayLength() : (bBackstep ? BackstepFallbackDuration : 0.90f);
-    Start(EMove::Dodge, Duration);
-    if (DodgeSequence) UFSCharacterActions::PlayActionAnimation(&Player(), DodgeSequence, 1.0f);
     PlaySharedSound(TEXT("EvadeCloth"));
-    Travel(Direction, bBackstep ? BackstepDistance : SharedDodgeDistance, Duration);
-    const float Recovery = bBackstep ? BackstepRecovery : Branch() == 'M' ? 0.10f : 0.0f;
-    Cooldown[Dodge] = GetWorld()->GetTimeSeconds() + Duration + Recovery;
+    Travel(Direction, bBackstep ? BackstepDistance : SharedDodgeDistance);
+    // Evade availability follows its montage. There is no second recovery timer.
+    Cooldown[Dodge] = 0;
 }
 
 void UFSClassCombat::SkillOne()
@@ -737,38 +751,32 @@ void UFSClassCombat::SkillOne()
     if (Unavailable() || bSelecting || !Branch() || !Grounded()) return;
     if (!Ready(First)) { Message(TEXT("Skill recovering")); return; }
     const double Now = GetWorld()->GetTimeSeconds();
-    if (Branch() == 'V' && (Move == EMove::Idle || (Move == EMove::Axe && Age >= 0.42f)) && Spend(15, 0, 0))
+    if (Branch() == 'V' && (Move == EMove::Idle || (Move == EMove::Axe && Phase(TEXT("Recovery")))) && Spend(15, 0, 0))
     {
         Heading = Player().GetActorForwardVector().GetSafeNormal2D();
         UFSCharacterActions::BeginAttackFacing(&Player());
         Player().SetActorRotation(Heading.Rotation());
-        const auto* Backstep = LoadObject<UAnimSequence>(nullptr, DashClip);
-        const float Duration = Backstep ? Backstep->GetPlayLength() : BackstepFallbackDuration;
-        Start(EMove::Leap, Duration);
-        if (auto* Takeoff = LoadObject<UAnimSequenceBase>(nullptr, LeapClip))
-        {
-            UFSCharacterActions::PlayActionAnimation(&Player(), Takeoff, 1.0f);
-        }
-        Travel(Heading, BackstepDistance, Duration, 55);
+        if (!Start(EMove::Leap)) return;
+        Travel(Heading, BackstepDistance, 55);
         auto* Movement = Player().GetCharacterMovement();
         PreLeapFlySpeed = Movement->MaxFlySpeed;
         Movement->MaxFlySpeed = 0;
         Movement->SetMovementMode(MOVE_Flying);
         LeapContactTarget.Reset();
-        bLeapStrikeStarted = false;
         Cooldown[First] = Now + 3;
         PlaySound(TEXT("SFX_Swing"));
     }
     else if (Branch() == 'S' && Move == EMove::Idle && Spend(0, 20, 0))
     {
-        Start(EMove::ShieldHold, 0.65f);
+        if (!Start(EMove::ShieldHold)) return;
         Cooldown[First] = Now + 1.20;
     }
     else if (Branch() == 'M' && Move == EMove::Idle)
     {
         if (!CanPay(0, 0, 20)) { Message(TEXT("Not enough Mana")); return; }
         bStepped = false;
-        Start(EMove::OrbHold, 0.80f);
+        bFull = false;
+        if (!Start(EMove::OrbHold)) return;
     }
 }
 
@@ -776,19 +784,19 @@ void UFSClassCombat::ReleaseSkillOne()
 {
     if (Move == EMove::ShieldHold)
     {
-        const bool bLong = Age >= 0.30f;
+        const bool bLong = bHadTurnCue || Phase(TEXT("Charged"));
         Heading = MoveInput(Player().GetActorForwardVector().GetSafeNormal2D());
-        const float Duration = bLong ? 0.26f : 0.16f;
-        Start(EMove::ShieldStep, Duration + 0.12f, DashClip);
-        Travel(Heading, bLong ? 180 : 90, Duration);
+        if (!Start(EMove::ShieldStep)) return;
+        Travel(Heading, bLong ? 180 : 90);
         PlaySound(TEXT("SFX_Swing"));
     }
     else if (Move == EMove::OrbHold)
     {
-        bFull = Age >= 0.45f;
+        if (AnimatedAction->GetActionName() == TEXT("WeaveStep") && AnimatedAction->IsActionActive()) return;
+        bFull = bFull || bHadTurnCue || Phase(TEXT("Charged"));
         LockProjectileAim();
         UFSCharacterActions::BeginAttackFacing(&Player());
-        Start(EMove::Orb, 0.28f, CastClip);
+        if (!Start(EMove::Orb)) return;
     }
 }
 
@@ -796,11 +804,11 @@ void UFSClassCombat::SkillTwo()
 {
     if (Unavailable() || bSelecting || !Branch()) return;
     const double Now = GetWorld()->GetTimeSeconds();
-    const bool bAxeRecovery = Move == EMove::Axe && Age >= 0.42f;
-    const bool bSwordRecovery = Move == EMove::Sword && Age >= 0.24f;
+    const bool bAxeRecovery = Move == EMove::Axe && Phase(TEXT("Recovery"));
+    const bool bSwordRecovery = Move == EMove::Sword && Phase(TEXT("Recovery"));
     if (Class->Kit == EKit::BloodMage && AnchorUntil > Now && Move == EMove::Idle && Grounded())
     {
-        Start(EMove::Recall, 0.20f, CastClip);
+        if (!Start(EMove::Recall)) return;
         return;
     }
     if (!Grounded()) return;
@@ -811,19 +819,19 @@ void UFSClassCombat::SkillTwo()
         if ((Move == EMove::Idle || bAxeRecovery) && CanPay(18, 0, 0))
         {
             Heading = AimDirection();
-            Start(EMove::StoneHold, 0.80f);
+            if (!Start(EMove::StoneHold)) return;
         }
         else if (Move == EMove::Idle || bAxeRecovery) Message(TEXT("Not enough Vitality"));
         break;
     case EKit::Berserk:
-        if (bAxeRecovery && Age <= 0.78f && Spend(0, 24, 0))
+        if (bAxeRecovery && Phase(TEXT("Combo")) && Spend(0, 24, 0))
         {
             const FVector Right = FVector::CrossProduct(FVector::UpVector, Heading);
             const FVector InputDirection = MoveInput(Heading.RotateAngleAxis(60, FVector::UpVector));
             const float Angle = FMath::RadiansToDegrees(FMath::Atan2(FVector::DotProduct(Right, InputDirection), FVector::DotProduct(Heading, InputDirection)));
             const FVector Direction = Heading.RotateAngleAxis(FMath::Clamp(Angle, -120.0f, 120.0f), FVector::UpVector);
-            Start(EMove::Pivot, 0.46f, FollowClip);
-            Travel(Direction, 185, 0.30f);
+            if (!Start(EMove::Pivot)) return;
+            Travel(Direction, 185);
             Cooldown[Second] = Now + 1.8;
             PlaySound(TEXT("SFX_Swing"));
         }
@@ -834,7 +842,7 @@ void UFSClassCombat::SkillTwo()
         {
             if (!CanPay(12, 0, 18)) { Message(TEXT("Blood Thread requires 12 Vitality and 18 Mana")); break; }
             LockProjectileAim();
-            Start(EMove::Thread, 0.32f, CastClip);
+            if (!Start(EMove::Thread)) return;
         }
         break;
     case EKit::Mercenary:
@@ -842,7 +850,8 @@ void UFSClassCombat::SkillTwo()
         {
             Heading = AimDirection();
             UFSCharacterActions::BeginAttackFacing(&Player());
-            Start(EMove::PaidStand, 0.80f, FollowClip);
+            if (!Start(EMove::PaidStand)) return;
+            Travel(Heading, 145);
             Cooldown[Second] = Now + 3;
         }
         break;
@@ -851,8 +860,8 @@ void UFSClassCombat::SkillTwo()
         {
             Heading = AimDirection();
             UFSCharacterActions::BeginAttackFacing(&Player());
-            Start(EMove::Slip, 0.34f, FollowClip);
-            Travel(MoveInput(FVector::CrossProduct(FVector::UpVector, Heading)), 160, 0.20f);
+            if (!Start(EMove::Slip)) return;
+            Travel(MoveInput(FVector::CrossProduct(FVector::UpVector, Heading)), 160);
             Cooldown[Second] = Now + 0.8;
             PlaySound(TEXT("SFX_Swing"));
         }
@@ -863,7 +872,7 @@ void UFSClassCombat::SkillTwo()
             if (!CanPay(0, 0, 30)) { Message(TEXT("Not enough Mana")); break; }
             Heading = AimDirection();
             UFSCharacterActions::BeginAttackFacing(&Player());
-            Start(EMove::Wave, 0.55f, CastClip);
+            if (!Start(EMove::Wave)) return;
         }
         break;
     case EKit::Paladin:
@@ -873,7 +882,7 @@ void UFSClassCombat::SkillTwo()
             if (!WardGround(Ground)) { Message(TEXT("Choose clear ground for the seal")); break; }
             if (!CanPay(0, 0, 18)) { Message(TEXT("Not enough Mana")); break; }
             PendingWardCenter = Ground;
-            Start(EMove::Seal, 0.40f, CastClip);
+            if (!Start(EMove::Seal)) return;
         }
         break;
     case EKit::SpellWeaver:
@@ -893,7 +902,11 @@ void UFSClassCombat::SkillTwo()
             }
             if (!Spend(0, 22, 0)) break;
             bStepped = true;
-            Travel(Direction, 210, 0.22f);
+            // The step has its own montage/Travel phase while retaining the held Orb state.
+            const bool bWasCharged = Phase(TEXT("Charged"));
+            if (!Start(EMove::OrbHold, TEXT("WeaveStep"))) break;
+            bFull = bWasCharged;
+            Travel(Direction, 210);
             Cooldown[Second] = Now + 1.2;
             if (auto* Trail = Marker(*GetWorld(), Player().GetActorLocation() - FVector(0, 0, 82), FVector(0.5, 0.5, 0.025)))
             {
@@ -906,7 +919,7 @@ void UFSClassCombat::SkillTwo()
         {
             if (!CanPay(0, 0, 22)) { Message(TEXT("Not enough Mana")); break; }
             CurveSide = 0;
-            Start(EMove::BendHold, 0.90f);
+            if (!Start(EMove::BendHold)) return;
         }
         break;
     default:
@@ -919,16 +932,16 @@ void UFSClassCombat::ReleaseSkillTwo()
     if (Move == EMove::StoneHold)
     {
         if (!Spend(18, 0, 0)) { Finish(); return; }
-        bFull = Age >= 0.50f;
+        bFull = bHadTurnCue || Phase(TEXT("Charged"));
         Heading = AimDirection();
         Player().SetActorRotation(Heading.Rotation());
-        Start(EMove::Stone, 0.55f, AxeClip);
+        if (!Start(EMove::Stone)) return;
         Cooldown[Second] = GetWorld()->GetTimeSeconds() + 3.8;
     }
     else if (Move == EMove::BendHold)
     {
         LockProjectileAim();
-        Start(EMove::Bend, 0.32f, CastClip);
+        if (!Start(EMove::Bend)) return;
     }
 }
 
@@ -957,7 +970,7 @@ float UFSClassCombat::HitTarget(AActor& Target, float Damage, const FVector& Con
     return Enemy ? FMath::Max(0.0f, Before - Enemy->GetHealth()) : Reported;
 }
 
-void UFSClassCombat::BladeContact(float From, float To, float Radius, float Damage, int32 Limit)
+void UFSClassCombat::BladeContact(float Radius, float Damage, int32 Limit)
 {
     FVector BladeStart = StrikePoint, BladeEnd = StrikePoint;
     if (StrikePoint.IsNearlyZero()) WeaponEdge(BladeStart, BladeEnd);
@@ -966,10 +979,8 @@ void UFSClassCombat::BladeContact(float From, float To, float Radius, float Dama
     LastBladeStart = BladeStart;
     LastBladeEnd = BladeEnd;
     bHaveBladeSample = true;
-    if (Age < From || PreviousAge > To || HitActors.Num() >= Limit) return;
-    const float Span = FMath::Max(KINDA_SMALL_NUMBER, Age - PreviousAge);
-    const float Begin = FMath::Clamp((From - PreviousAge) / Span, 0.0f, 1.0f);
-    const float End = FMath::Clamp((To - PreviousAge) / Span, 0.0f, 1.0f);
+    float Begin, End;
+    if (HitActors.Num() >= Limit || !AnimatedAction->WindowOverlap(TEXT("Hit"), Begin, End)) return;
     const FVector BaseFrom = FMath::Lerp(PriorStart, BladeStart, Begin);
     const FVector TipFrom = FMath::Lerp(PriorEnd, BladeEnd, Begin);
     const FVector BaseTo = FMath::Lerp(PriorStart, BladeStart, End);
@@ -1000,11 +1011,15 @@ void UFSClassCombat::BladeContact(float From, float To, float Radius, float Dama
     }
 }
 
-void UFSClassCombat::LeapContact(const FVector& Start, const FVector& Desired, float FromAge, float ToAge)
+void UFSClassCombat::LeapContact(const FVector& Start, const FVector& Desired, float TraveledFraction)
 {
-    if (bCommitted || ToAge < LeapContactOpen || FromAge >= LeapContactClose || ToAge <= FromAge) return;
-    const FVector A = FMath::Lerp(Start, Desired, FMath::Clamp((LeapContactOpen - FromAge) / (ToAge - FromAge), 0.0f, 1.0f));
-    const FVector B = FMath::Lerp(Start, Desired, FMath::Clamp((LeapContactClose - FromAge) / (ToAge - FromAge), 0.0f, 1.0f));
+    if (bCommitted || TraveledFraction <= 0) return;
+    float Begin, End;
+    if (!AnimatedAction->WindowOverlap(TEXT("Hit"), Begin, End)) return;
+    if (Begin >= TraveledFraction) return;
+    // Desired is already the swept/collision-clipped location; convert frame fractions to that segment.
+    const FVector A = FMath::Lerp(Start, Desired, Begin / TraveledFraction);
+    const FVector B = FMath::Lerp(Start, Desired, FMath::Min(End, TraveledFraction) / TraveledFraction);
     const auto* Capsule = Player().GetCapsuleComponent();
     FCollisionQueryParams Query(SCENE_QUERY_STAT(FSFuryLeap), false, &Player());
     FCollisionObjectQueryParams Pawns(ECC_Pawn);
@@ -1040,7 +1055,7 @@ void UFSClassCombat::LeapContact(const FVector& Start, const FVector& Desired, f
         if (LeapContactTarget.IsValid() && Target != LeapContactTarget.Get()) continue;
         if (FVector::DotProduct((Target->GetActorLocation() - A).GetSafeNormal2D(), Heading) <= 0) continue;
         bCommitted = true;
-        if (!IsPracticeTarget(*Target)) MoveTime = 0;
+        if (!IsPracticeTarget(*Target)) bTravel = false;
         PlaySound(TEXT("SFX_Hit"));
         const float Actual = HitTarget(*Target, 40.8f, Target->GetActorLocation());
         if (!IsGuild() && Actual > 0)
@@ -1051,15 +1066,6 @@ void UFSClassCombat::LeapContact(const FVector& Start, const FVector& Desired, f
             Message(FString::Printf(TEXT("Fury Leap  +%.1f V"), After - Before));
         }
         break;
-    }
-}
-
-void UFSClassCombat::PlayLeapStrike()
-{
-    bLeapStrikeStarted = true;
-    if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, FollowClip))
-    {
-        UFSCharacterActions::PlayActionAnimation(&Player(), Animation, 1.0f);
     }
 }
 
@@ -1175,17 +1181,20 @@ void UFSClassCombat::TickShots(float DeltaTime)
 
 void UFSClassCombat::TickAction(float DeltaTime)
 {
-    const float ActionDeltaTime = DeltaTime * ActionClockRate;
-    PreviousAge = Age;
-    Age = FMath::Min(EndTime, Age + ActionDeltaTime);
+    if (!AnimatedAction) return;
+    AnimatedAction->SampleFrame();
     const double Now = GetWorld()->GetTimeSeconds();
-    if (MoveTime > 0)
+    SetFlag(TEXT("bDodging"), Phase(TEXT("Invulnerable")));
+    SetBasicAttackMovementLock(Phase(TEXT("MoveLock")));
+    float ChargeFrom, ChargeTo;
+    if (!bHadTurnCue && AnimatedAction->WindowOverlap(TEXT("Charged"), ChargeFrom, ChargeTo))
     {
-        const float From = MoveAge / MoveTime;
-        // An Orb release can overlap a Weave Step that started before the cast.
-        const float TravelDeltaTime = Move == EMove::Orb ? DeltaTime : ActionDeltaTime;
-        MoveAge = FMath::Min(MoveAge + TravelDeltaTime, MoveTime);
-        const float To = MoveAge / MoveTime;
+        bHadTurnCue = true;
+        PlaySound(TEXT("SFX_Hit"));
+    }
+    float From, To;
+    if (bTravel && AnimatedAction->WindowProgress(TEXT("Travel"), From, To))
+    {
         const bool bCurve = Move == EMove::Pivot;
         const FVector Direction = bCurve ? FMath::Lerp(Heading, TravelHeading, (From + To) * 0.5f).GetSafeNormal2D() : TravelHeading;
         const float ArcDelta = 4 * MoveArc * (To * (1 - To) - From * (1 - From));
@@ -1200,72 +1209,51 @@ void UFSClassCombat::TickAction(float DeltaTime)
                 return DodgeSequence->ExtractRootTrackTransform(FAnimExtractContext(Alpha * Length), nullptr).GetTranslation();
             };
             const FVector RootTravel = RootPosition(1) - RootPosition(0);
-            if (!RootTravel.IsNearlyZero())
-            {
-                TravelFraction = FVector::DotProduct(RootPosition(To) - RootPosition(From), RootTravel) / RootTravel.SizeSquared();
-            }
+            if (!RootTravel.IsNearlyZero()) TravelFraction = FVector::DotProduct(RootPosition(To) - RootPosition(From), RootTravel) / RootTravel.SizeSquared();
         }
         const FVector Offset = Direction * MoveDistance * TravelFraction + FVector(0, 0, ArcDelta);
         FHitResult Obstruction;
         const bool bClear = MovePlayer(Offset, Obstruction);
         if (Move == EMove::Leap && (bClear || Obstruction.bBlockingHit))
         {
-            const float TravelEnd = bClear ? Age : FMath::Lerp(PreviousAge, Age, Obstruction.Time);
-            if (!bClear && TravelEnd < LeapContactOpen && IsValid(Obstruction.GetActor()) && IsEnemy(*Obstruction.GetActor()))
+            if (!bClear && !Phase(TEXT("Hit")) && IsValid(Obstruction.GetActor()) && IsEnemy(*Obstruction.GetActor()))
             {
                 LeapContactTarget = Obstruction.GetActor();
                 Player().GetCharacterMovement()->SetMovementMode(MOVE_Falling);
             }
-            LeapContact(StartLocation, Player().GetActorLocation(), PreviousAge, TravelEnd);
+            LeapContact(StartLocation, Player().GetActorLocation(), bClear ? 1 : Obstruction.Time);
         }
-        if (!bClear || To >= 1)
-        {
-            MoveTime = 0;
-        }
-        if (Move == EMove::Leap && MoveTime <= 0 && Player().GetCharacterMovement()->MovementMode == MOVE_Flying)
-        {
+        if (!bClear || To >= 1) bTravel = false;
+        if (Move == EMove::Leap && !bTravel && Player().GetCharacterMovement()->MovementMode == MOVE_Flying)
             Player().GetCharacterMovement()->SetMovementMode(MOVE_Falling);
-        }
     }
+    const bool bRelease = AnimatedAction->TakeEvent(TEXT("Commit"));
 
     switch (Move)
     {
     case EMove::Idle:
-        if (BufferedBasicUntil > Now && Ready(Basic))
+        if (bBufferedBasic)
         {
-            BufferedBasicUntil = 0;
+            bBufferedBasic = false;
             Attack();
         }
         return;
-    case EMove::Axe: BladeContact(0.25f, 0.42f, 22, 34, 3); break;
-    case EMove::Sword: BladeContact(0.14f, 0.24f, 16, 22, 2); break;
+    case EMove::Axe: BladeContact(22, 34, 3); break;
+    case EMove::Sword: BladeContact(16, 22, 2); break;
     case EMove::Dodge:
         Player().StopJumping();
-        if (Branch() == 'V' && Age >= BackstepImmunity) SetFlag(TEXT("bDodging"), false);
         break;
     case EMove::Leap:
-        if (!bLeapStrikeStarted && Age >= LeapStrikeStart) PlayLeapStrike();
         if (LeapContactTarget.IsValid() && !bCommitted)
         {
             const FVector Position = Player().GetActorLocation();
-            LeapContact(Position, Position, PreviousAge, Age);
-        }
-        if (PreviousAge < EndTime - LeapStrikeBlendOut && Age >= EndTime - LeapStrikeBlendOut)
-        {
-            if (auto* Instance = Player().GetMesh()->GetAnimInstance())
-            {
-                Instance->Montage_Stop(FMath::Max(0.0f, EndTime - Age));
-            }
-        }
-        if (Age >= EndTime)
-        {
-            if (!bCommitted) Message(TEXT("Fury Leap missed"));
+            LeapContact(Position, Position);
         }
         break;
     case EMove::ShieldHold:
     case EMove::StoneHold:
         Player().SetActorRotation(AimDirection().Rotation());
-        if (!bHadTurnCue && Age >= (Move == EMove::ShieldHold ? 0.30f : 0.50f))
+        if (!bHadTurnCue && Phase(TEXT("Charged")))
         {
             bHadTurnCue = true;
             PlaySound(TEXT("SFX_Hit"));
@@ -1273,20 +1261,20 @@ void UFSClassCombat::TickAction(float DeltaTime)
         break;
     case EMove::ShieldStep:
         StrikePoint = Player().GetActorLocation() + Heading * 60;
-        BladeContact(0.06f, EndTime - 0.12f, 34, 12, 1);
+        BladeContact(34, 12, 1);
         break;
     case EMove::Spark:
-        if (!bCommitted && Age >= 0.10f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             bSparkPending = true;
         }
         break;
     case EMove::OrbHold:
-        if (!bHadTurnCue && Age >= 0.45f) { bHadTurnCue = true; PlaySound(TEXT("SFX_Hit")); }
+        if (!bHadTurnCue && (bFull || Phase(TEXT("Charged")))) { bHadTurnCue = true; PlaySound(TEXT("SFX_Hit")); }
         break;
     case EMove::Orb:
-        if (!bCommitted && Age >= 0.12f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             if (Spend(0, 0, 20))
@@ -1300,7 +1288,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
         }
         break;
     case EMove::Stone:
-        if (!bCommitted && Age >= 0.18f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             const FVector Feet = Player().GetActorLocation() - FVector(0, 0, Player().GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
@@ -1311,9 +1299,9 @@ void UFSClassCombat::TickAction(float DeltaTime)
             Fire(MoveTemp(Pulse));
         }
         break;
-    case EMove::Pivot: BladeContact(0.10f, 0.30f, 24, 24, 2); break;
+    case EMove::Pivot: BladeContact(24, 24, 2); break;
     case EMove::Thread:
-        if (!bCommitted && Age >= 0.14f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             const FCollisionQueryParams Query(SCENE_QUERY_STAT(FSThreadOrigin), false, &Player());
@@ -1335,7 +1323,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
         }
         break;
     case EMove::Recall:
-        if (!bCommitted && Age >= 0.08f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             if (AnchorUntil > Now)
@@ -1352,12 +1340,12 @@ void UFSClassCombat::TickAction(float DeltaTime)
         }
         break;
     case EMove::PaidStand:
-        if (!bCommitted && Age >= 0.32f) { bCommitted = true; Travel(Heading, 145, 0.20f); }
-        BladeContact(0.38f, 0.52f, 18, 36, 1);
+        if (!bCommitted && bRelease) bCommitted = true;
+        BladeContact(18, 36, 1);
         break;
-    case EMove::Slip: BladeContact(0.10f, 0.20f, 17, 16, 2); break;
+    case EMove::Slip: BladeContact(17, 16, 2); break;
     case EMove::Wave:
-        if (!bCommitted && Age >= 0.20f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             if (Spend(0, 0, 30))
@@ -1371,7 +1359,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
         }
         break;
     case EMove::Seal:
-        if (!bCommitted && Age >= 0.18f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             FVector Ground;
@@ -1400,7 +1388,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
         break;
     }
     case EMove::Bend:
-        if (!bCommitted && Age >= 0.14f)
+        if (!bCommitted && bRelease)
         {
             bCommitted = true;
             if (Spend(0, 0, 22))
@@ -1415,12 +1403,20 @@ void UFSClassCombat::TickAction(float DeltaTime)
         }
         break;
     }
-    if (Age >= EndTime && !(Move == EMove::Orb && MoveTime > 0))
+    if (bBufferedBasic && IsBasicAttacking() && Phase(TEXT("Combo")))
+    {
+        // A new attack input explicitly interrupts the recovery through the authored combo window.
+        Cancel();
+        Attack();
+        return;
+    }
+    if (AnimatedAction->HasCompleted())
     {
         if (Move == EMove::OrbHold || Move == EMove::ShieldHold) ReleaseSkillOne();
         else if (Move == EMove::StoneHold || Move == EMove::BendHold) ReleaseSkillTwo();
         else Finish();
     }
+    AnimatedAction->ConsumeFrame();
 }
 
 void UFSClassCombat::ClearEffects()
@@ -1538,8 +1534,8 @@ float UFSClassCombat::GuardDamage(float Damage, AActor* Causer)
     if (Dot >= 0.642788f)
     {
         if (Move == EMove::ShieldHold) Damage *= 0.40f;
-        else if (Move == EMove::StoneHold && Age >= 0.12f) Damage *= 0.55f;
-        else if (Move == EMove::PaidStand && Age < 0.32f && Dot >= 0.707107f) Damage *= 0.30f;
+        else if (Move == EMove::StoneHold && Phase(TEXT("Guard"))) Damage *= 0.55f;
+        else if (Move == EMove::PaidStand && Phase(TEXT("Guard")) && Dot >= 0.707107f) Damage *= 0.30f;
     }
     if (InsideWard())
     {
@@ -1657,7 +1653,7 @@ void UFSClassCombat::UpdateCamera(float DeltaTime)
     float Scale = bAim ? 0.70f : 1.0f;
     if (Move == EMove::ShieldHold || Move == EMove::BendHold) Scale = FMath::Min(Scale, 0.55f);
     if (Move == EMove::OrbHold) Scale = FMath::Min(Scale, 0.60f);
-    if (IsBasicAttacking() || MoveTime > 0 || Move == EMove::Dodge || Move == EMove::StoneHold || Move == EMove::PaidStand || bSelecting)
+    if (Phase(TEXT("MoveLock")) || bTravel || Move == EMove::Dodge || Move == EMove::StoneHold || Move == EMove::PaidStand || bSelecting)
     {
         Scale = 0;
     }
@@ -2045,12 +2041,12 @@ void UFSClassCombat::Draw(AHUD& HUD) const
     }
     if (Move == EMove::OrbHold)
     {
-        Text(Age >= 0.45f ? TEXT("Focused Orb") : TEXT("Broad Orb"), FLinearColor::White, 28, Height - 155.0f, 1.0f);
+        Text((bFull || Phase(TEXT("Charged"))) ? TEXT("Focused Orb") : TEXT("Broad Orb"), FLinearColor::White, 28, Height - 155.0f, 1.0f);
     }
     if (Move == EMove::ShieldHold)
-        Text(Age >= 0.30f ? TEXT("Guard ready") : TEXT("Guard raised"), Gold, 28, Height - 155.0f, 1.0f);
+        Text(Phase(TEXT("Charged")) ? TEXT("Guard ready") : TEXT("Guard raised"), Gold, 28, Height - 155.0f, 1.0f);
     if (Move == EMove::StoneHold)
-        Text(Age >= 0.50f ? TEXT("Stonebreak charged") : TEXT("Bracing"), Gold, 28, Height - 155.0f, 1.0f);
+        Text(Phase(TEXT("Charged")) ? TEXT("Stonebreak charged") : TEXT("Bracing"), Gold, 28, Height - 155.0f, 1.0f);
     const auto Ring = [&](const FVector& Center, float Radius, FLinearColor Color, bool bDashed)
     {
         for (int32 Index = 0; Index < 36; Index += bDashed ? 2 : 1)

@@ -75,7 +75,10 @@ private:
     bool Ready(int32 Slot) const;
     bool CanPay(float V, float S, float M) const;
     bool Spend(float V, float S, float M);
-    void Start(EMove Next, float End, const TCHAR* Clip = nullptr);
+    bool Start(EMove Next, FName Animation = NAME_None);
+    UFUNCTION() void AnimationEnded(FName Action, bool bInterrupted);
+    UFUNCTION() void AnimationWindowChanged(FName Name, bool bActive);
+    bool Phase(FName Name) const;
     void Finish();
     void Cancel();
     void TickAction(float DeltaTime);
@@ -115,10 +118,9 @@ private:
     void WeaponEdge(FVector& Start, FVector& End) const;
     bool HasTravelFloor(const FVector& Target) const;
     bool MovePlayer(const FVector& Offset, FHitResult& Hit);
-    void Travel(const FVector& Direction, float Distance, float Duration, float Arc = 0);
-    void BladeContact(float From, float To, float Radius, float Damage, int32 Limit);
-    void LeapContact(const FVector& Start, const FVector& Desired, float FromAge, float ToAge);
-    void PlayLeapStrike();
+    void Travel(const FVector& Direction, float Distance, float Arc = 0);
+    void BladeContact(float Radius, float Damage, int32 Limit);
+    void LeapContact(const FVector& Start, const FVector& Desired, float TraveledFraction = 1);
     float HitTarget(AActor& Target, float Damage, const FVector& ContactPoint);
     void Fire(FShot Shot);
     void EmitPendingSpark(UWorld* World, ELevelTick TickType, float DeltaTime);
@@ -127,7 +129,6 @@ private:
     void UpdateFootsteps(float DeltaTime);
     void UpdateDefeat(float DeltaTime);
     void PlayReaction(const TCHAR* Name);
-    void PlayTimedAnimation(class UAnimSequenceBase* Animation, float Window);
     void Rumble(float Intensity, float Duration);
     void StopRumble();
     void EquipClassVisual();
@@ -153,6 +154,9 @@ private:
     TObjectPtr<UAnimSequence> DodgeSequence;
 
     UPROPERTY(Transient)
+    TObjectPtr<class UFSAnimatedAction> AnimatedAction;
+
+    UPROPERTY(Transient)
     TObjectPtr<USoundBase> FootstepSound;
 
     const FSEssence::FClass* Class = nullptr;
@@ -171,14 +175,9 @@ private:
     double AnchorUntil = 0;
     double WardUntil = 0;
     double WardPulseUntil = 0;
-    double BufferedBasicUntil = 0;
-    float Age = 0;
-    float PreviousAge = 0;
-    float EndTime = 0;
-    float ActionClockRate = 1;
+    bool bBufferedBasic = false;
     float MoveDistance = 0;
-    float MoveTime = 0;
-    float MoveAge = 0;
+    bool bTravel = false;
     float MoveArc = 0;
     float WardCapacity = 0;
     float OriginalWalkSpeed = 0;
@@ -191,7 +190,6 @@ private:
     bool bSelecting = false;
     bool bAim = false;
     bool bAimFacing = false;
-    bool bLeapStrikeStarted = false;
     bool bCommitted = false;
     bool bSparkPending = false;
     bool bFull = false;
@@ -206,8 +204,6 @@ private:
     float FootstepDistance = 0;
     float LastFootstepPitch = 1.0f;
     float LastAirSpeed = 0;
-    float DefeatAge = 0;
-    float DefeatDuration = 0;
     double LastReadyCue = 0;
     uint64 RumbleHandle = 0;
     uint8 RequestedInputs = 0;
