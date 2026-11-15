@@ -1,6 +1,7 @@
 #include "FSClassCombat.h"
 
 #include "FSCharacterActions.h"
+#include "FSClassEquipment.h"
 #include "FSAnimatedAction.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSingleNodeInstance.h"
@@ -642,19 +643,14 @@ void UFSClassCombat::WeaponEdge(FVector& Base, FVector& Tip) const
 {
     if (ClassWeapon && ClassWeapon->GetStaticMesh())
     {
-        const FTransform& Transform = ClassWeapon->GetComponentTransform();
-        // Weapon meshes have their long axis along local Z. The axe head spans local Y.
-        if (Branch() == 'V')
+        const FFSEquipmentVisual* Visual = Equipment ? Equipment->Visuals.Find(Branch() == 'V' ? TEXT("axel_barbar") : TEXT("sword")) : nullptr;
+        if (Visual)
         {
-            Base = Transform.TransformPosition(FVector(0, -14, 67));
-            Tip = Transform.TransformPosition(FVector(0, 14, 67));
+            const FTransform& Transform = ClassWeapon->GetComponentTransform();
+            Tip = Transform.TransformPosition(Visual->EdgeTip);
+            Base = Move == EMove::PaidStand ? Tip : Transform.TransformPosition(Visual->EdgeBase);
+            return;
         }
-        else
-        {
-            Tip = Transform.TransformPosition(FVector(0, 0, 145));
-            Base = Move == EMove::PaidStand ? Tip : Transform.TransformPosition(FVector(0, 0, 42));
-        }
-        return;
     }
     Base = Hand();
     Tip = Base + Player().GetActorForwardVector() * 60;
@@ -1671,27 +1667,27 @@ void UFSClassCombat::UpdateCamera(float DeltaTime)
 
 void UFSClassCombat::EquipClassVisual()
 {
-    auto Equip = [this](TObjectPtr<UStaticMeshComponent>& Mesh, const TCHAR* Path, FName Socket)
+    if (!Equipment) Equipment = LoadObject<UFSClassEquipment>(nullptr,
+        TEXT("/Game/Combat/Equipment/DA_FS_ClassEquipment.DA_FS_ClassEquipment"));
+    auto Equip = [this](TObjectPtr<UStaticMeshComponent>& Mesh, const FFSEquipmentVisual* Visual)
     {
         if (!Mesh)
         {
             Mesh = NewObject<UStaticMeshComponent>(&Player());
             Player().AddInstanceComponent(Mesh);
             Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            Mesh->SetupAttachment(Player().GetMesh(), Socket);
             Mesh->RegisterComponent();
         }
-        Mesh->SetStaticMesh(Path ? LoadObject<UStaticMesh>(nullptr, Path) : nullptr);
+        Mesh->SetStaticMesh(Visual ? Visual->Mesh.Get() : nullptr);
+        // Socket transforms own the complete model pivot and scale. Reattach on every class change.
+        Mesh->AttachToComponent(Player().GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale,
+            Visual ? Visual->AttachmentSocket : NAME_None);
+        Mesh->SetRelativeTransform(FTransform::Identity);
     };
-    const TCHAR* Weapon = Branch() == 'V' ? TEXT("/Game/Fantasy_Pack/Characters/Viking_Ulf/Mesh/SM_Viking_Axe.SM_Viking_Axe")
-        : Branch() == 'S' ? TEXT("/Game/Fantasy_Pack/Characters/Warrior/Mesh/SM_Sword.SM_Sword") : nullptr;
-    Equip(ClassWeapon, Weapon, TEXT("hand_r"));
-    ClassWeapon->SetRelativeRotation(FRotator(90, 0, 0));
-    ClassWeapon->SetRelativeLocation(FVector(Branch() == 'V' ? -16 : -14, 0, 0));
-    ClassWeapon->SetRelativeScale3D(FVector(Branch() == 'V' ? 1.25 : 0.78));
-    Equip(ClassShield, Branch() == 'S' ? TEXT("/Engine/BasicShapes/Cylinder.Cylinder") : nullptr, TEXT("lowerarm_l"));
-    ClassShield->SetRelativeScale3D(FVector(0.52, 0.52, 0.065));
-    ClassShield->SetRelativeRotation(FRotator(90, 0, 0));
+    const FFSEquipmentVisual* Weapon = Equipment && (Branch() == 'V' || Branch() == 'S')
+        ? Equipment->Visuals.Find(Branch() == 'V' ? TEXT("axel_barbar") : TEXT("sword")) : nullptr;
+    Equip(ClassWeapon, Weapon);
+    Equip(ClassShield, Equipment && Branch() == 'S' ? Equipment->Visuals.Find(TEXT("round_shield")) : nullptr);
 }
 
 bool UFSClassCombat::InteractAtAltar()

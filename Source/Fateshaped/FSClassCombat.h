@@ -145,6 +145,8 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<class UStaticMeshComponent> ClassShield;
     UPROPERTY(Transient)
+    TObjectPtr<class UFSClassEquipment> Equipment;
+    UPROPERTY(Transient)
     TObjectPtr<AActor> Altar;
 
     UPROPERTY(Transient)

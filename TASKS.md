@@ -1,10 +1,11 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-150 animation-driven player actions: COMPILED + PIE_TESTED (scripted). **Next P0:** rebuild the Windows package with FS-150, complete a normal-input expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-151 equipment attachment pivots: COMPILED + PIE_TESTED (scripted), grip close-ups inspected. **Next P0:** rebuild the Windows package with FS-150/151, complete a normal-input expedition through Gerald and verify reward persistence after relaunch.
 
 **FS-150 checkpoint:** the owner explicitly authorized a local commit and GitHub push before packaged validation. The checkpoint scope excludes the pre-existing mannequin, roll, Guild and staged RoundShield edits.
 
 - **Essence shimmer — COMPILED, Niagara editor preview observed.** `/Game/VFX/NS_Essences` with `/Game/VFX/M_Essences` spawns a local-space mote cloud that cycles red, yellow, and blue. It is not placed in a level. PIE and the Windows package are **NOT_TESTED**.
+- **FS-151 · Equipment pivots — COMPILED + PIE_TESTED.** Added `axel_barbar`, `sword`, `round_shield` mesh sockets to Quinn/Manny, aligned handles with palms, and replaced the cylinder shield with `/Game/Models/RoundShield/RoundShield`. A Data Asset selects models and contact points; class changes reattach without stale offsets. Seven attachment/attack cases and four Dungeon hit/miss cases passed (axe 34, sword 22). Source model geometry and pre-existing changes were preserved. See `Docs/EquipmentAttachments.md`. Restart the main editor for the rebuilt native DLL. Normal input and updated Windows package are **NOT_TESTED**.
 - **FS-150 · Animation-driven actions — COMPILED + PIE_TESTED.** Shared montage-instance lifecycle, action-set asset and 22 authored montages replace action-end clocks and fixed combat/travel windows. Notify states drive contact, immunity, movement locks, charge and combo transitions; cue events commit casts once. Warrior moves after the hit phase, chains attacks through the combo window, and releases roll/jump locks with actual playback. All 28 lifecycle and 13 combat cases passed; scripted contract rewards, Guild return and a new-PIE save reload passed. See DEVLOG and `Docs/AnimatedActions.md`. Restart the main editor to load the rebuilt native DLL. Normal device input and the updated Windows package are **NOT_TESTED**.
 - **Roll jump lock — PIE_TESTED (FS-150).** Shift evade holds `JumpMaxCount` at 0 during playback and restores the original value on completion, interruption and death.
 

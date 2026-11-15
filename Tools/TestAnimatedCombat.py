@@ -32,6 +32,9 @@ cases=[
 ]
 if '-FSInspectAxe' in ue.SystemLibrary.get_command_line(): cases=cases[:2]
 if '-FSInspectLeap' in ue.SystemLibrary.get_command_line(): cases=[c for c in cases if c[1].startswith('leap')]
+if '-FSInspectEquipment' in ue.SystemLibrary.get_command_line():
+    cases=cases[:4]
+    profile='Attachments151Combat'
 mana_cost={'thread_recall':18,'wave':30,'wave_wall':30,'orb_broad':20,'orb_focused':20,'seal':18,'weave':20,'weave_wall':20,'bend_straight':22}
 stamina_cost={'pivot_valid':24,'shield_short':20,'shield_long':20,'shield_auto':20,'slip':16,'wave_cancel':25,'weave':22}
 
@@ -179,10 +182,11 @@ def tick(_dt):
                             [ue.ObjectTypeQuery.OBJECT_TYPE_QUERY1,ue.ObjectTypeQuery.OBJECT_TYPE_QUERY2],False,[p],ue.DrawDebugTrace.NONE,True)
                         if probe: record.setdefault('floor_probes',[]).append(str(probe))
                 if key.startswith('axe'):
-                    weapon=next(c for c in p.get_components_by_class(ue.StaticMeshComponent) if c.get_editor_property('static_mesh') and c.get_editor_property('static_mesh').get_name()=='SM_Viking_Axe')
+                    weapon=next(c for c in p.get_components_by_class(ue.StaticMeshComponent) if c.get_editor_property('static_mesh') and c.get_editor_property('static_mesh').get_name() in ('SM_Viking_Axe','SM_Axel'))
                     transform=weapon.get_world_transform()
-                    base_point=ue.MathLibrary.transform_location(transform,ue.Vector(0,-14,67))-origin
-                    tip_point=ue.MathLibrary.transform_location(transform,ue.Vector(0,14,67))-origin
+                    definition=ue.load_asset('/Game/Combat/Equipment/DA_FS_ClassEquipment').get_editor_property('visuals')['axel_barbar']
+                    base_point=ue.MathLibrary.transform_location(transform,definition.edge_base)-origin
+                    tip_point=ue.MathLibrary.transform_location(transform,definition.edge_tip)-origin
                     record.setdefault('weapon_samples',[]).append([anim.montage_get_position(montage),
                         [base_point.x,base_point.y,base_point.z],[tip_point.x,tip_point.y,tip_point.z]])
             if read(p,'bAttacking'):
