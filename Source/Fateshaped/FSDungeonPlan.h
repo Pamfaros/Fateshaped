@@ -8,6 +8,7 @@ inline const FIntPoint Directions[] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
 inline const FIntPoint NormalHalfSize(1, 1);
 inline const FIntPoint BossHalfSize(1, 1);
 inline const FIntPoint ExitHalfSize(1, 1);
+inline constexpr int32 RoomFieldHalfExtent = 8;
 inline constexpr int32 MinStraightTilesBetweenCorners = 2;
 
 enum class ERoomRole : uint8
@@ -30,7 +31,6 @@ struct FPlan
     TSet<FIntPoint> Tiles;
     FIntPoint GateTile = FIntPoint::ZeroValue;
     FIntPoint ExitDirection = FIntPoint::ZeroValue;
-    int32 Shortcuts = 0;
     int32 Corners = 0;
     int32 Junctions = 0;
 };

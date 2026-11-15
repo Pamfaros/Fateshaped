@@ -10,7 +10,8 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
 {
     using namespace FSDungeon;
     TSet<FIntPoint> BossLocations;
-    int32 PlansWithJunctions = 0;
+    bool bSawSpikes = false;
+    bool bSawPoison = false;
     for (int32 Seed = 1; Seed <= 256; ++Seed)
     {
         FPlan Plan;
@@ -18,16 +19,15 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
         {
             continue;
         }
-        TestEqual(TEXT("Room count"), Plan.Rooms.Num(), 9);
-        TestTrue(TEXT("Orthogonal bends"), Plan.Corners > 0);
+        TestEqual(TEXT("Room count including the exit"), Plan.Rooms.Num(), 6);
         TestTrue(TEXT("Two straight tiles separate consecutive corridor bends"), HasSpacedCorners(Plan));
-        PlansWithJunctions += Plan.Junctions > 0;
-        TestEqual(TEXT("Optional loop"), Plan.Shortcuts, 1);
 
         TSet<ERoomRole> Roles;
         for (const FRoom& Room : Plan.Rooms)
         {
             Roles.Add(Room.Role);
+            TestTrue(TEXT("Room center is inside the dense placement field"),
+                FMath::Abs(Room.Center.X) <= RoomFieldHalfExtent && FMath::Abs(Room.Center.Y) <= RoomFieldHalfExtent);
             const FIntPoint ExpectedHalfSize = Room.Role == ERoomRole::Boss ? BossHalfSize
                 : Room.Role == ERoomRole::Exit ? ExitHalfSize : NormalHalfSize;
             TestTrue(TEXT("Room matches its authored module footprint"), Room.HalfSize == ExpectedHalfSize);
@@ -47,10 +47,17 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
                     (Ports & (1 << Side)) != 0, Plan.Tiles.Contains(Tile + Directions[Side]));
             }
         }
-        TestTrue(TEXT("Both trap types occur"), Roles.Contains(ERoomRole::Spikes) && Roles.Contains(ERoomRole::Poison));
+        TestTrue(TEXT("All required room roles occur exactly once"), Roles.Num() == 6 && Roles.Contains(ERoomRole::Entrance)
+            && Roles.Contains(ERoomRole::Guardian) && Roles.Contains(ERoomRole::Boss)
+            && Roles.Contains(ERoomRole::Cache) && Roles.Contains(ERoomRole::Exit));
+        const bool bHasSpikes = Roles.Contains(ERoomRole::Spikes);
+        const bool bHasPoison = Roles.Contains(ERoomRole::Poison);
+        TestTrue(TEXT("Exactly one trap room occurs per run"), bHasSpikes != bHasPoison);
+        bSawSpikes |= bHasSpikes;
+        bSawPoison |= bHasPoison;
     }
     TestTrue(TEXT("The final encounter moves across runs"), BossLocations.Num() > 10);
-    TestTrue(TEXT("T junctions occur across the compact layouts"), PlansWithJunctions > 10);
+    TestTrue(TEXT("Both trap types occur across different seeds"), bSawSpikes && bSawPoison);
 
     FPlan First;
     FPlan Repeat;

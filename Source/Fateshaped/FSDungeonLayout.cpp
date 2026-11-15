@@ -494,7 +494,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
     constexpr float SpawnChance = 0.60f;
     for (const FRoom& Room : Plan.Rooms)
     {
-        if (Room.Role != ERoomRole::Passage)
+        if (Room.Role != ERoomRole::Guardian)
         {
             continue;
         }
@@ -534,8 +534,8 @@ bool AFSDungeonLayout::Build(int32 RunId)
     AddLabel(*this, TEXT("ExitLabel"), ExitCenter + FVector(0, 0, 105), GateRotation.Yaw + 180, TEXT("RETURN TO GUILD"));
 
     SetActorTickEnabled(true);
-    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt run %d: %d rooms, %d tiles, %d L bends, %d T junctions, %d shortcuts, %d traps, %d enemies."),
-        RunId, Plan.Rooms.Num(), Plan.Tiles.Num(), Plan.Corners, Plan.Junctions, Plan.Shortcuts, Traps.Num(), Spawned.Num());
+    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt run %d: %d rooms, %d tiles, %d L bends, %d T junctions, %d traps, %d enemies."),
+        RunId, Plan.Rooms.Num(), Plan.Tiles.Num(), Plan.Corners, Plan.Junctions, Traps.Num(), Spawned.Num());
     return true;
 }
 
