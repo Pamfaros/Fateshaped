@@ -4,7 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "FSDungeonLayout.generated.h"
 
-class UInstancedStaticMeshComponent;
 class UDamageType;
 class UMaterialInterface;
 class UPointLightComponent;
@@ -34,7 +33,9 @@ public:
 
 private:
     virtual void Tick(float DeltaSeconds) override;
+    virtual void Destroyed() override;
     bool Build(int32 RunId);
+    AActor* SpawnModule(int32 Module, const FVector& Location, double Yaw = 0);
     void AddTrap(const FVector& Center, bool bSpikes, bool bAlongX);
     void AddChest(const FVector& Center);
     void UpdateChest(const AActor& Player);
@@ -70,13 +71,13 @@ private:
     TArray<FTrap> Traps;
 
     UPROPERTY()
-    TObjectPtr<UInstancedStaticMeshComponent> Floor;
+    TArray<TSubclassOf<AActor>> ModuleClasses;
 
     UPROPERTY()
-    TObjectPtr<UInstancedStaticMeshComponent> Walls;
+    TArray<TObjectPtr<AActor>> SpawnedModules;
 
     UPROPERTY()
-    TObjectPtr<UStaticMesh> TorchMesh;
+    TObjectPtr<UStaticMesh> TrapPlateMesh;
 
     UPROPERTY()
     TObjectPtr<UStaticMesh> CrateMesh;

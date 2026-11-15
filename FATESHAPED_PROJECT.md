@@ -485,6 +485,13 @@ Use a **handcrafted and validated map** built from modular rooms (approximately 
 
 The second run may use **the same map** with a small encounter variation (different enemy positioning, an additional enemy type, or cosmetic lighting changes). From a scope perspective, demonstrating the new Spellsword ability matters far more than building an entirely new biome.
 
+The Forgotten Crypt assembles the prepared Actor Blueprints in `/Game/Dungeon/Modules`. Use the Components viewport to edit their geometry, materials, lighting and portal. The normal room also serves as the entrance and hosts encounter, trap or cache roles. The boss and exit have dedicated templates.
+
+- Keep the module origin at the center of the floor and the walkable surface at local Z = 0. On the 240 cm grid the normal, boss and exit room footprints are 5 × 5, 7 × 7 and 3 × 3 tiles.
+- Room doorway components are `Door_PX`, `Door_PY`, `Door_NX` and `Door_NY`. Keep one centered on each wall with its existing `FS_Door_*` tag and outward orientation. The generator places `BP_FS_Door_WallPlug` at unused doorways.
+- The straight, right bend, left bend, T and cross corridor Blueprints each occupy one grid tile. Preserve the local ports when editing them. The generator rotates the templates by 90° increments.
+- In `BP_FS_Room_Exit`, the tagged `ExitTrigger` component sets the completion point. The existing encounter gate still controls access.
+
 ### 13.2. Long-Term Procedural Generation [POST-JAM]
 
 The creator's proposed algorithm:

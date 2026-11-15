@@ -3,7 +3,6 @@
 #include "FSRewardLibrary.h"
 #include "FSCryptEnemy.h"
 
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -21,7 +20,6 @@
 namespace
 {
 constexpr double TileSize = 240.0;
-constexpr double WallThickness = 24.0;
 constexpr double WallHeight = 460.0;
 using FSDungeon::ERoomRole;
 using FSDungeon::FRoom;
@@ -33,15 +31,41 @@ const FName FinalEncounterTag(TEXT("Enc2"));
 const FName DeathHandledTag(TEXT("FS_DeathHandled"));
 constexpr double ChestReach = 230.0;
 
+enum EModule : int32 { NormalRoom, BossRoom, ExitRoom, Straight, RightBend, LeftBend, TJunction, Cross, WallPlug };
+const FName DoorTags[] = {TEXT("FS_Door_PX"), TEXT("FS_Door_PY"), TEXT("FS_Door_NX"), TEXT("FS_Door_NY")};
+
 FVector TileCenter(const FIntPoint& Tile, double Height = 0.0)
 {
     return FVector(Tile.X * TileSize, Tile.Y * TileSize, Height);
 }
 
-void AddBox(TArray<FTransform>& Boxes, const FVector& Center, const FVector& Dimensions)
+uint8 RotateOpenings(uint8 Mask, int32 Turns)
 {
-    // The engine basic cube measures 100 cm per side.
-    Boxes.Emplace(FRotator::ZeroRotator, Center, Dimensions / 100.0);
+    return ((Mask << Turns) | (Mask >> (4 - Turns))) & 0b1111;
+}
+
+USceneComponent* FindModulePoint(AActor& Module, FName Tag)
+{
+    const TArray<UActorComponent*> Points = Module.GetComponentsByTag(USceneComponent::StaticClass(), Tag);
+    return Points.Num() == 1 ? Cast<USceneComponent>(Points[0]) : nullptr;
+}
+
+EModule CorridorModule(uint8 Openings, FIntPoint Tile, double& Yaw)
+{
+    const int32 Degree = FMath::CountBits(static_cast<uint32>(Openings));
+    const bool bStraight = Openings == 0b0101 || Openings == 0b1010;
+    const bool bRight = (Tile.X + Tile.Y) % 2 == 0;
+    const EModule Module = Degree == 4 ? Cross : Degree == 3 ? TJunction : bStraight ? Straight : bRight ? RightBend : LeftBend;
+    constexpr uint8 DefaultOpenings[] = {0b0101, 0b0110, 0b1100, 0b0111, 0b1111};
+    for (int32 Turns = 0; Turns < 4; ++Turns)
+    {
+        if (RotateOpenings(DefaultOpenings[Module - Straight], Turns) == Openings)
+        {
+            Yaw = Turns * 90.0;
+            return Module;
+        }
+    }
+    return WallPlug;
 }
 
 UStaticMeshComponent* AddProp(AActor& Owner, UStaticMesh* Mesh, const FVector& Base, double Yaw)
@@ -109,12 +133,17 @@ AFSDungeonLayout::AFSDungeonLayout()
     PrimaryActorTick.bStartWithTickEnabled = false;
     PrimaryActorTick.TickInterval = 0.08f;
     SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("LayoutRoot")));
-    Floor = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("Floor"));
-    Walls = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("Walls"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-    static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneFloor(TEXT("/Game/Medieval_Sewer_Dungeon/Materials_Instance/MI_Large_Room_Floor.MI_Large_Room_Floor"));
-    static ConstructorHelpers::FObjectFinder<UMaterialInterface> StoneWall(TEXT("/Game/Medieval_Sewer_Dungeon/Materials_Instance/MI_Large_Wall.MI_Large_Wall"));
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Torch(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Torch_1.SM_Torch_1"));
+    static const ConstructorHelpers::FClassFinder<AActor> Normal(TEXT("/Game/Dungeon/Modules/BP_FS_Room_Normal"));
+    static const ConstructorHelpers::FClassFinder<AActor> Boss(TEXT("/Game/Dungeon/Modules/BP_FS_Room_Boss"));
+    static const ConstructorHelpers::FClassFinder<AActor> Exit(TEXT("/Game/Dungeon/Modules/BP_FS_Room_Exit"));
+    static const ConstructorHelpers::FClassFinder<AActor> Line(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Straight"));
+    static const ConstructorHelpers::FClassFinder<AActor> Right(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Right"));
+    static const ConstructorHelpers::FClassFinder<AActor> Left(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Left"));
+    static const ConstructorHelpers::FClassFinder<AActor> Tee(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_TJunction"));
+    static const ConstructorHelpers::FClassFinder<AActor> Crossing(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Cross"));
+    static const ConstructorHelpers::FClassFinder<AActor> Plug(TEXT("/Game/Dungeon/Modules/BP_FS_Door_WallPlug"));
+    ModuleClasses = {Normal.Class, Boss.Class, Exit.Class, Line.Class, Right.Class, Left.Class, Tee.Class, Crossing.Class, Plug.Class};
+    static const ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Crate(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Crate.SM_Crate"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Barrel(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Barrel.SM_Barrel"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Chest(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Chest.SM_Chest"));
@@ -123,7 +152,7 @@ AFSDungeonLayout::AFSDungeonLayout()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cone(TEXT("/Engine/BasicShapes/Cone.Cone"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Telegraph(TEXT("/Game/Combat/FX/MI_FX_Telegraph.MI_FX_Telegraph"));
-    TorchMesh = Torch.Object;
+    TrapPlateMesh = Cube.Object;
     CrateMesh = Crate.Object;
     BarrelMesh = Barrel.Object;
     ChestMesh = Chest.Object;
@@ -132,23 +161,26 @@ AFSDungeonLayout::AFSDungeonLayout()
     SpikeMesh = Cone.Object;
     FumeMesh = Sphere.Object;
     TelegraphMaterial = Telegraph.Object;
-    for (UInstancedStaticMeshComponent* Component : {Floor.Get(), Walls.Get()})
+}
+
+AActor* AFSDungeonLayout::SpawnModule(int32 Module, const FVector& Location, double Yaw)
+{
+    FActorSpawnParameters Params;
+    Params.Owner = this;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AActor* Actor = GetWorld()->SpawnActor<AActor>(ModuleClasses[Module], Location, FRotator(0, Yaw, 0), Params);
+    if (Actor) SpawnedModules.Add(Actor);
+    return Actor;
+}
+
+void AFSDungeonLayout::Destroyed()
+{
+    for (AActor* Actor : SpawnedModules)
     {
-        Component->SetupAttachment(GetRootComponent());
-        Component->SetMobility(EComponentMobility::Movable);
-        Component->SetStaticMesh(Cube.Object);
-        Component->SetCollisionProfileName(TEXT("BlockAll"));
-        Component->SetGenerateOverlapEvents(false);
-        Component->SetCanEverAffectNavigation(false);
+        if (IsValid(Actor)) Actor->Destroy();
     }
-    if (StoneFloor.Succeeded())
-    {
-        Floor->SetMaterial(0, StoneFloor.Object);
-    }
-    if (StoneWall.Succeeded())
-    {
-        Walls->SetMaterial(0, StoneWall.Object);
-    }
+    SpawnedModules.Reset();
+    Super::Destroyed();
 }
 
 void AFSDungeonLayout::GenerateForContract(AActor* Player, const FString& QuestId, int32 RunId)
@@ -231,8 +263,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
             }
         }
     }
-    if (!Gate || LegacyGeometry.IsEmpty()
-        || !Floor->GetStaticMesh() || !Walls->GetStaticMesh())
+    if (!Gate || LegacyGeometry.IsEmpty() || ModuleClasses.Contains(nullptr))
     {
         return false;
     }
@@ -242,26 +273,39 @@ bool AFSDungeonLayout::Build(int32 RunId)
         return false;
     }
 
-    TArray<FTransform> FloorBoxes;
-    TArray<FTransform> WallBoxes;
-    for (const FIntPoint Tile : Plan.Tiles)
+    const FRotator GateRotation = TileCenter(Plan.ExitDirection).Rotation();
+    for (const FRoom& Room : Plan.Rooms)
     {
-        AddBox(FloorBoxes, TileCenter(Tile, -20.0), FVector(TileSize, TileSize, 40.0));
-        for (const FIntPoint Neighbor : FSDungeon::Directions)
+        const bool bExit = Room.Role == ERoomRole::Exit;
+        const EModule Shape = bExit ? ExitRoom : Room.Role == ERoomRole::Boss ? BossRoom : NormalRoom;
+        const double Yaw = bExit ? GateRotation.Yaw + 180 : 0;
+        AActor* Module = SpawnModule(Shape, TileCenter(Room.Center), Yaw);
+        if (!Module) return false;
+        if (bExit)
         {
-            if (!Plan.Tiles.Contains(Tile + Neighbor))
+            const USceneComponent* ExitPoint = FindModulePoint(*Module, TEXT("FS_ExitPoint"));
+            if (!ExitPoint) return false;
+            ExitCenter = ExitPoint->GetComponentLocation();
+        }
+        const uint8 Openings = FSDungeon::RoomOpenings(Plan, Room);
+        const int32 Rotation = (FMath::RoundToInt(Yaw / 90.0) % 4 + 4) % 4;
+        for (int32 Index = 0; Index < UE_ARRAY_COUNT(FSDungeon::Directions); ++Index)
+        {
+            const USceneComponent* Door = FindModulePoint(*Module, DoorTags[Index]);
+            if (!Door) return false;
+            if (!(Openings & (1 << ((Index + Rotation) % 4)))
+                && !SpawnModule(WallPlug, Door->GetComponentLocation(), Door->GetComponentRotation().Yaw))
             {
-                const FVector EdgeOffset(Neighbor.X * TileSize / 2.0, Neighbor.Y * TileSize / 2.0, 0.0);
-                const FVector WallSize = Neighbor.X == 0
-                    ? FVector(TileSize + WallThickness, WallThickness, WallHeight)
-                    : FVector(WallThickness, TileSize + WallThickness, WallHeight);
-                AddBox(WallBoxes, TileCenter(Tile, WallHeight / 2.0) + EdgeOffset, WallSize);
+                return false;
             }
         }
     }
-
-    Floor->AddInstances(FloorBoxes, false);
-    Walls->AddInstances(WallBoxes, false);
+    for (const FIntPoint Tile : Plan.Corridors)
+    {
+        double Yaw = 0;
+        const EModule Shape = CorridorModule(FSDungeon::CorridorOpenings(Plan, Tile), Tile, Yaw);
+        if (Shape == WallPlug || !SpawnModule(Shape, TileCenter(Tile), Yaw)) return false;
+    }
 
     FRandomStream Random(RunId);
     TArray<AFSCryptEnemy*> Spawned;
@@ -334,8 +378,6 @@ bool AFSDungeonLayout::Build(int32 RunId)
             continue;
         }
         const FVector Corner = TileCenter(Room.Center + FIntPoint(-Room.HalfSize.X, Room.HalfSize.Y));
-        AddProp(*this, TorchMesh, Corner + FVector(0, 65, 105), 180);
-        AddLight(*this, Corner + FVector(0, 0, 200), FLinearColor(1.0f, 0.44f, 0.16f), 18000.0f, 980.0f);
 
         switch (Room.Role)
         {
@@ -343,16 +385,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
             AddProp(*this, BarrelMesh, Corner + FVector(60, -10, 0), 20);
             break;
         case ERoomRole::Boss:
-        {
-            for (const int32 Side : {-1, 1})
-            {
-                const FVector Brazier = TileCenter(Room.Center + FIntPoint(Side * Room.HalfSize.X, -Room.HalfSize.Y));
-                AddProp(*this, TorchMesh, Brazier + FVector(0, -60, 115), 0);
-                AddLight(*this, Brazier + FVector(0, 0, 205), FLinearColor(1.0f, 0.23f, 0.08f), 22000, 920);
-            }
-            AddLight(*this, Center + FVector(0, 0, 305), FLinearColor(0.75f, 0.28f, 0.12f), 19500, 1050);
             break;
-        }
         case ERoomRole::Spikes:
         case ERoomRole::Poison:
             AddTrap(Center, Room.Role == ERoomRole::Spikes, Random.RandRange(0, 1) == 0);
@@ -372,14 +405,11 @@ bool AFSDungeonLayout::Build(int32 RunId)
         }
     }
 
-    ExitCenter = TileCenter(Plan.Rooms.Last().Center, 90.0);
-    const FRotator GateRotation = TileCenter(Plan.ExitDirection).Rotation();
     Gate->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
     Gate->SetActorLocationAndRotation(TileCenter(Plan.GateTile, WallHeight / 2.0), GateRotation, false, nullptr, ETeleportType::TeleportPhysics);
     Gate->SetActorScale3D(FVector(0.35, TileSize / 100.0, WallHeight / 100.0));
 
     AddLabel(*this, TEXT("ExitLabel"), ExitCenter + FVector(0, 0, 105), GateRotation.Yaw + 180, TEXT("RETURN TO GUILD"));
-    AddLight(*this, ExitCenter + FVector(0, 0, 100), FLinearColor(0.1f, 0.65f, 1.0f), 14000.0f, 850.0f);
 
     for (AActor* Actor : LegacyGeometry)
     {
@@ -508,7 +538,7 @@ void AFSDungeonLayout::AddTrap(const FVector& Center, bool bSpikes, bool bAlongX
     UStaticMeshComponent* Plate = NewObject<UStaticMeshComponent>(this);
     Plate->SetupAttachment(GetRootComponent());
     Plate->SetMobility(EComponentMobility::Movable);
-    Plate->SetStaticMesh(Floor->GetStaticMesh());
+    Plate->SetStaticMesh(TrapPlateMesh);
     Plate->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Plate->SetRelativeLocation(Center + FVector(0, 0, 2));
     Plate->SetRelativeScale3D(FVector(Trap.HalfExtent.X / 50, Trap.HalfExtent.Y / 50, 0.025));

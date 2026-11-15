@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-134 aligns Arcane Spark with the live reticle at emission. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-135 assembles the Crypt from editable room, corridor and wall plug Blueprints. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -85,6 +85,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-132 · Fury Leap length — COMPILED + PIE_TESTED.** Fury Leap shares Backstep's 320 cm cap and 0.97 s duration. Verified all four V-first paths, hit and healing, wall stop and Vitality cost boundaries. Packaged testing remains pending.
 - **FS-133 · Aimed projectile convergence — COMPILED + PIE_TESTED.** Lock the world point under the reticle when committing to the cast and calculate launch direction from the animated hand at emission. Checked aimed Spark, both Orb variants, neutral Bend, horizontal Thread and wall occlusion. Packaged testing remains pending.
 - **FS-134 · Live Arcane Spark aim — COMPILED + PIE_TESTED.** Sample the current camera after its update when Spark is emitted. In empty space, converge on the ray inside Spark's 550 cm range. Verified a camera turn during Mage's basic cast, clear air, wall blocking and the basic-attack suite. Packaged testing remains pending.
+- **FS-135 · Authored Crypt modules — COMPILED + PIE_TESTED.** Created nine editable Blueprints in `/Game/Dungeon/Modules`. Generation connects centered doors, rotates corridor pieces, and seals unused doorways. All 256 seeds passed the layout test. A scripted expedition verified door collision, the portal and return rewards. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 

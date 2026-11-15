@@ -1,9 +1,44 @@
 #include "FSDungeonPlan.h"
 
+#include "Algo/Reverse.h"
 #include "CompGeom/Delaunay2.h"
 
 namespace FSDungeon
 {
+FIntPoint DoorTile(const FRoom& Room, FIntPoint Direction)
+{
+    return Room.Center + Direction * (Direction.X != 0 ? Room.HalfSize.X : Room.HalfSize.Y);
+}
+
+uint8 RoomOpenings(const FPlan& Plan, const FRoom& Room)
+{
+    uint8 Openings = 0;
+    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Directions); ++Index)
+    {
+        const FIntPoint Side = Directions[Index];
+        if (Plan.Corridors.Contains(DoorTile(Room, Side) + Side)) Openings |= 1 << Index;
+    }
+    return Openings;
+}
+
+uint8 CorridorOpenings(const FPlan& Plan, FIntPoint Tile)
+{
+    uint8 Openings = 0;
+    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Directions); ++Index)
+    {
+        const FIntPoint Side = Directions[Index];
+        const FIntPoint Neighbor = Tile + Side;
+        if (Plan.Corridors.Contains(Neighbor) || Plan.Rooms.ContainsByPredicate([&](const FRoom& Room)
+        {
+            return DoorTile(Room, Side * -1) == Neighbor;
+        }))
+        {
+            Openings |= 1 << Index;
+        }
+    }
+    return Openings;
+}
+
 namespace
 {
 constexpr int32 RoomCount = 8;
@@ -50,11 +85,10 @@ void IndexRoom(FRoomTiles& RoomTiles, const FRoom& Room, int32 Index)
 
 bool PlaceRooms(FRandomStream& Random, TArray<FRoom>& Rooms)
 {
-    Rooms.Add({FIntPoint::ZeroValue, FIntPoint(2, 2), ERoomRole::Entrance});
+    Rooms.Add({FIntPoint::ZeroValue, NormalHalfSize, ERoomRole::Entrance});
     for (int32 Attempt = 0; Attempt < 220 && Rooms.Num() < RoomCount; ++Attempt)
     {
-        const FRoom Candidate{{Random.RandRange(0, 31), Random.RandRange(-15, 15)},
-            {Random.RandRange(2, 3), Random.RandRange(2, 3)}};
+        const FRoom Candidate{{Random.RandRange(0, 31), Random.RandRange(-15, 15)}, NormalHalfSize};
         if (Fits(Rooms, Candidate, RoomMargin))
         {
             Rooms.Add(Candidate);
@@ -138,9 +172,8 @@ bool PlaceExit(FPlan& Plan, int32 Boss, FRoomTiles& RoomTiles, TSet<FIntPoint>& 
     const FRoom& Arena = Plan.Rooms[Boss];
     for (const FIntPoint Direction : Directions)
     {
-        const int32 Wall = Direction.X ? Arena.HalfSize.X : Arena.HalfSize.Y;
-        const FIntPoint Door = Arena.Center + Direction * (Wall + 1);
-        const FRoom Exit{Door + Direction * 4, FIntPoint(1, 1), ERoomRole::Exit};
+        const FIntPoint Door = DoorTile(Arena, Direction) + Direction;
+        const FRoom Exit{Door + Direction * 4, ExitHalfSize, ERoomRole::Exit};
         if (!Fits(Plan.Rooms, Exit, 1))
         {
             continue;
@@ -192,7 +225,22 @@ bool IsAllowedRoom(const FRoomTiles& RoomTiles, FIntPoint Tile, int32 A, int32 B
     return !Room || *Room == A || *Room == B;
 }
 
-bool CanCarve(const TArray<FIntPoint>& Path, const FRoomTiles& RoomTiles, const TSet<FIntPoint>& Corridors,
+bool CanCarveTile(const FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint>& Reserved,
+    FIntPoint Tile, int32 A, int32 B, const FIntPoint* AdjacentJunction)
+{
+    if (!IsAllowedRoom(RoomTiles, Tile, A, B) || Plan.Corridors.Contains(Tile) || Reserved.Contains(Tile)) return false;
+    if (RoomTiles.Contains(Tile)) return true;
+    for (FIntPoint Side : Directions)
+    {
+        const FIntPoint Neighbor = Tile + Side;
+        if (!IsAllowedRoom(RoomTiles, Neighbor, A, B) || Reserved.Contains(Neighbor)) return false;
+        if (const int32* Room = RoomTiles.Find(Neighbor); Room && DoorTile(Plan.Rooms[*Room], Side * -1) != Neighbor) return false;
+        if (Plan.Corridors.Contains(Neighbor) && (!AdjacentJunction || Neighbor != *AdjacentJunction)) return false;
+    }
+    return true;
+}
+
+bool CanCarve(const FPlan& Plan, const TArray<FIntPoint>& Path, const FRoomTiles& RoomTiles,
     const TSet<FIntPoint>& Reserved, int32 A, int32 B, const FIntPoint* Junction)
 {
     for (int32 Index = 0; Index < Path.Num(); ++Index)
@@ -202,29 +250,58 @@ bool CanCarve(const TArray<FIntPoint>& Path, const FRoomTiles& RoomTiles, const 
         {
             continue;
         }
-        if (!IsAllowedRoom(RoomTiles, Tile, A, B) || Corridors.Contains(Tile) || Reserved.Contains(Tile))
-        {
-            return false;
-        }
-        if (RoomTiles.Contains(Tile))
-        {
-            continue;
-        }
-
-        for (FIntPoint Direction : Directions)
-        {
-            const FIntPoint Neighbor = Tile + Direction;
-            if (!IsAllowedRoom(RoomTiles, Neighbor, A, B) || Reserved.Contains(Neighbor))
-            {
-                return false;
-            }
-            if (Corridors.Contains(Neighbor) && !(Junction && Index == Path.Num() - 2 && Neighbor == *Junction))
-            {
-                return false;
-            }
-        }
+        if (!CanCarveTile(Plan, RoomTiles, Reserved, Tile, A, B, Index == Path.Num() - 2 ? Junction : nullptr)) return false;
     }
     return true;
+}
+
+// A centered socket sometimes needs an extra bend to clear the room wall.
+TArray<FIntPoint> RouteBetweenPorts(const FPlan& Plan, const FRoomTiles& RoomTiles,
+    const TSet<FIntPoint>& Reserved, int32 A, int32 B, const FIntPoint* Junction = nullptr)
+{
+    TSet<FIntPoint> Goals;
+    TArray<FIntPoint> Queue;
+    TMap<FIntPoint, FIntPoint> Previous;
+    for (FIntPoint Side : Directions)
+    {
+        const FIntPoint Start = DoorTile(Plan.Rooms[A], Side) + Side;
+        if (CanCarveTile(Plan, RoomTiles, Reserved, Start, A, B, nullptr))
+        {
+            Queue.Add(Start);
+            Previous.Add(Start, Start);
+        }
+        Goals.Add(Junction ? *Junction + Side : DoorTile(Plan.Rooms[B], Side) + Side);
+    }
+    for (int32 Index = 0; Index < Queue.Num(); ++Index)
+    {
+        FIntPoint Tile = Queue[Index];
+        if (Goals.Contains(Tile))
+        {
+            TArray<FIntPoint> Path;
+            if (Junction) Path.Add(*Junction);
+            Path.Add(Tile);
+            while (Previous[Tile] != Tile)
+            {
+                Tile = Previous[Tile];
+                Path.Add(Tile);
+            }
+            Algo::Reverse(Path);
+            return Path;
+        }
+        for (FIntPoint Side : Directions)
+        {
+            const FIntPoint Next = Tile + Side;
+            if (Next.X < -10 || Next.X > 41 || FMath::Abs(Next.Y) > 25 || Previous.Contains(Next)
+                || RoomTiles.Contains(Next)
+                || !CanCarveTile(Plan, RoomTiles, Reserved, Next, A, B, Goals.Contains(Next) ? Junction : nullptr))
+            {
+                continue;
+            }
+            Previous.Add(Next, Tile);
+            Queue.Add(Next);
+        }
+    }
+    return {};
 }
 
 void Carve(FPlan& Plan, const FRoomTiles& RoomTiles, const TArray<FIntPoint>& Path, TArray<FIntPoint>* Added = nullptr)
@@ -249,13 +326,16 @@ bool ConnectRooms(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint
     for (bool bBend : {bXFirst, !bXFirst})
     {
         const TArray<FIntPoint> Path = MakeL(Plan.Rooms[A].Center, Plan.Rooms[B].Center, bBend);
-        if (CanCarve(Path, RoomTiles, Plan.Corridors, Reserved, A, B, nullptr))
+        if (CanCarve(Plan, Path, RoomTiles, Reserved, A, B, nullptr))
         {
             Carve(Plan, RoomTiles, Path, Added);
             return true;
         }
     }
-    return false;
+    const TArray<FIntPoint> Path = RouteBetweenPorts(Plan, RoomTiles, Reserved, A, B);
+    if (Path.IsEmpty()) return false;
+    Carve(Plan, RoomTiles, Path, Added);
+    return true;
 }
 
 bool JoinCorridor(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint>& Reserved,
@@ -268,19 +348,26 @@ bool JoinCorridor(FPlan& Plan, const FRoomTiles& RoomTiles, const TSet<FIntPoint
         {
             return Plan.Corridors.Contains(Junction + Direction) || RoomTiles.Contains(Junction + Direction);
         };
-        const bool bHorizontal = IsOpen(Directions[0]) && IsOpen(Directions[2]) && !IsOpen(Directions[1]) && !IsOpen(Directions[3]);
-        const bool bVertical = IsOpen(Directions[1]) && IsOpen(Directions[3]) && !IsOpen(Directions[0]) && !IsOpen(Directions[2]);
-        if (!bHorizontal && !bVertical)
-        {
-            continue;
-        }
-        const TArray<FIntPoint> Path = MakeL(Start, Junction, bHorizontal);
-        if (Path.Num() >= 2 && (bHorizontal ? Path[Path.Num() - 2].X == Junction.X : Path[Path.Num() - 2].Y == Junction.Y)
-            && CanCarve(Path, RoomTiles, Plan.Corridors, Reserved, Room, INDEX_NONE, &Junction))
+        const int32 Horizontal = IsOpen(Directions[0]) + IsOpen(Directions[2]);
+        const int32 Vertical = IsOpen(Directions[1]) + IsOpen(Directions[3]);
+        if (Horizontal != 2 && Vertical != 2) continue;
+        // Join a straight trunk perpendicularly or complete the missing arm of a T.
+        const TArray<FIntPoint> Path = MakeL(Start, Junction, Horizontal == 2);
+        if (Path.Num() >= 2 && !IsOpen(Path[Path.Num() - 2] - Junction)
+            && CanCarve(Plan, Path, RoomTiles, Reserved, Room, INDEX_NONE, &Junction))
         {
             Carve(Plan, RoomTiles, Path, &Added);
             return true;
         }
+    }
+    for (FIntPoint Junction : Trunk)
+    {
+        const uint8 Ports = CorridorOpenings(Plan, Junction);
+        if (Ports != 0b0101 && Ports != 0b1010 && FMath::CountBits(static_cast<uint32>(Ports)) != 3) continue;
+        const TArray<FIntPoint> Path = RouteBetweenPorts(Plan, RoomTiles, Reserved, Room, INDEX_NONE, &Junction);
+        if (Path.IsEmpty()) continue;
+        Carve(Plan, RoomTiles, Path, &Added);
+        return true;
     }
     return false;
 }
@@ -349,7 +436,7 @@ bool Build(FRandomStream& Random, FPlan& Plan)
     }
     Plan.Rooms[Guardian].Role = ERoomRole::Guardian;
     Plan.Rooms[Boss].Role = ERoomRole::Boss;
-    Plan.Rooms[Boss].HalfSize = FIntPoint(3, 3);
+    Plan.Rooms[Boss].HalfSize = BossHalfSize;
     const bool bSpikesNearBoss = Random.RandRange(0, 1) == 0;
     Plan.Rooms[MainTrap].Role = bSpikesNearBoss ? ERoomRole::Spikes : ERoomRole::Poison;
 
@@ -385,7 +472,6 @@ bool Build(FRandomStream& Random, FPlan& Plan)
         const bool bPreserveEncounterRoute = From == Guardian || From == MainTrap;
         if (!bPreserveEncounterRoute && JoinCorridor(Plan, RoomTiles, Reserved, Room, Incoming[From], Incoming[Room]))
         {
-            ++Plan.Junctions;
             continue;
         }
         if (!ConnectRooms(Plan, RoomTiles, Reserved, From, Room, Random, &Incoming[Room]))
@@ -431,9 +517,11 @@ bool Build(FRandomStream& Random, FPlan& Plan)
     }
     for (FIntPoint Tile : Plan.Corridors)
     {
-        const int32 Horizontal = Plan.Tiles.Contains(Tile + Directions[0]) + Plan.Tiles.Contains(Tile + Directions[2]);
-        const int32 Vertical = Plan.Tiles.Contains(Tile + Directions[1]) + Plan.Tiles.Contains(Tile + Directions[3]);
-        Plan.Corners += Horizontal == 1 && Vertical == 1;
+        const uint8 Openings = CorridorOpenings(Plan, Tile);
+        const int32 Degree = FMath::CountBits(static_cast<uint32>(Openings));
+        if (Degree < 2) return false;
+        Plan.Corners += Degree == 2 && Openings != 0b0101 && Openings != 0b1010;
+        Plan.Junctions += Degree >= 3;
     }
 
     const TSet<FIntPoint> BeforeGate = Flood(Plan.Tiles, &Plan.GateTile);

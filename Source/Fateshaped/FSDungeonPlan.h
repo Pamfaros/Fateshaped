@@ -5,6 +5,9 @@
 namespace FSDungeon
 {
 inline const FIntPoint Directions[] = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+inline const FIntPoint NormalHalfSize(2, 2);
+inline const FIntPoint BossHalfSize(3, 3);
+inline const FIntPoint ExitHalfSize(1, 1);
 
 enum class ERoomRole : uint8
 {
@@ -30,5 +33,8 @@ struct FPlan
     int32 Junctions = 0;
 };
 
+FIntPoint DoorTile(const FRoom& Room, FIntPoint Direction);
+uint8 RoomOpenings(const FPlan& Plan, const FRoom& Room);
+uint8 CorridorOpenings(const FPlan& Plan, FIntPoint Tile);
 bool Generate(int32 Seed, FPlan& OutPlan);
 }

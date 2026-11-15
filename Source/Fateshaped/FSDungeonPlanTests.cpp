@@ -10,6 +10,7 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
 {
     using namespace FSDungeon;
     TSet<FIntPoint> BossLocations;
+    bool bFoundCrossing = false;
     for (int32 Seed = 1; Seed <= 256; ++Seed)
     {
         FPlan Plan;
@@ -26,14 +27,33 @@ bool FFSDungeonPlanTest::RunTest(const FString& Parameters)
         for (const FRoom& Room : Plan.Rooms)
         {
             Roles.Add(Room.Role);
+            const FIntPoint ExpectedHalfSize = Room.Role == ERoomRole::Boss ? BossHalfSize
+                : Room.Role == ERoomRole::Exit ? ExitHalfSize : NormalHalfSize;
+            TestTrue(TEXT("Room matches its authored module footprint"), Room.HalfSize == ExpectedHalfSize);
+            TestTrue(TEXT("Room has a connected doorway"), RoomOpenings(Plan, Room) != 0);
             if (Room.Role == ERoomRole::Boss)
             {
                 BossLocations.Add(Room.Center);
             }
         }
+        for (FIntPoint Tile : Plan.Corridors)
+        {
+            const uint8 Ports = CorridorOpenings(Plan, Tile);
+            if (!bFoundCrossing && Ports == 0b1111)
+            {
+                bFoundCrossing = true;
+                AddInfo(FString::Printf(TEXT("First cross module seed: %d"), Seed));
+            }
+            for (int32 Side = 0; Side < UE_ARRAY_COUNT(Directions); ++Side)
+            {
+                TestEqual(TEXT("Corridor adjacency agrees with the assembled door openings"),
+                    (Ports & (1 << Side)) != 0, Plan.Tiles.Contains(Tile + Directions[Side]));
+            }
+        }
         TestTrue(TEXT("Both trap types occur"), Roles.Contains(ERoomRole::Spikes) && Roles.Contains(ERoomRole::Poison));
     }
     TestTrue(TEXT("The final encounter moves across runs"), BossLocations.Num() > 10);
+    TestTrue(TEXT("At least one seed uses the cross module"), bFoundCrossing);
 
     FPlan First;
     FPlan Repeat;
