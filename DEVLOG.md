@@ -404,3 +404,8 @@ Add a short entry per checkpoint or blocker, newest first. Capture the test resu
 
 - Rebuilt the existing `/Game/VFX/NS_Essences` emitter and `/Game/VFX/M_Essences`. The material is unlit additive and masks sprites with a soft radial falloff times particle color. The system spawns about 28 motes per second inside a 32 cm sphere, drifts them outward, and pulls them back toward the origin in local space. Lifetime is random from 1.6 to 2.6 seconds. Particle color cycles red, yellow, and blue twice per lifetime, with a position phase offset, and fades in and out.
 - **COMPILED:** Niagara reported the system up to date with no errors after the final color expression. The Niagara editor preview showed red, yellow, and blue motes together. A temporary Guild preview actor was removed and `L_Guild` was not saved. PIE and the Windows package are **NOT_TESTED**. Proposed checkpoint `feat(vfx): add a three-color essence shimmer`. Next P0 remains the packaged contract loop and save reload.
+
+## 2026-11-15 · Roll jump lock
+
+- Evade now rejects jump input for the whole dodge, including the S/M roll and the V backstep. Entering the dodge stores `JumpMaxCount` and sets it to 0, so `CanJump` fails even if another input binding calls `Jump`. Each dodge tick and the action's end clear a held jump before the original count is restored.
+- **COMPILED:** Win64 Development editor target linked `UnrealEditor-Fateshaped.dll`. PIE is **NOT_TESTED** because the editor was not running after the build. Proposed checkpoint `fix(combat): block jumps during evade`. Next P0 remains the packaged contract loop and save reload.

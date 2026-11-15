@@ -104,6 +104,7 @@ private:
     void UpdateCamera(float DeltaTime);
     bool IsBasicAttacking() const;
     void SetBasicAttackMovementLock(bool bLocked);
+    void SetDodgeJumpLock(bool bLocked);
     FVector AimDirection() const;
     TOptional<FVector> ReticlePoint(const FVector& Emitter = FVector::ZeroVector, float Reach = 0) const;
     void LockProjectileAim();
@@ -198,6 +199,8 @@ private:
     bool bWasInsideWard = false;
     bool bHadTurnCue = false;
     bool bJumpForwarded = false;
+    bool bDodgeJumpLocked = false;
+    int32 SavedJumpMaxCount = 1;
     bool bPlayedDefeat = false;
     bool bWasGrounded = false;
     float FootstepDistance = 0;

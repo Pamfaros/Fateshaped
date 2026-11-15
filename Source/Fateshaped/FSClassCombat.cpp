@@ -479,6 +479,7 @@ void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
     bHaveBladeSample = false;
     SetFlag(TEXT("bAttacking"), Next != EMove::Dodge);
     SetFlag(TEXT("bDodging"), Next == EMove::Dodge);
+    SetDodgeJumpLock(Next == EMove::Dodge);
     if (Clip)
     {
         if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, Clip))
@@ -500,8 +501,29 @@ void UFSClassCombat::PlayTimedAnimation(UAnimSequenceBase* Animation, float Wind
     UFSCharacterActions::PlayActionAnimation(&Player(), Animation, 1.0f);
 }
 
+void UFSClassCombat::SetDodgeJumpLock(bool bLocked)
+{
+    ACharacter& Character = Player();
+    if (bLocked)
+    {
+        if (!bDodgeJumpLocked)
+        {
+            SavedJumpMaxCount = FMath::Max(1, Character.JumpMaxCount);
+            bDodgeJumpLocked = true;
+        }
+        Character.JumpMaxCount = 0;
+        Character.StopJumping();
+        return;
+    }
+    if (!bDodgeJumpLocked) return;
+    Character.StopJumping();
+    Character.JumpMaxCount = SavedJumpMaxCount;
+    bDodgeJumpLocked = false;
+}
+
 void UFSClassCombat::Finish()
 {
+    if (Move == EMove::Dodge) SetDodgeJumpLock(false);
     if (Move == EMove::Leap)
     {
         auto* Movement = Player().GetCharacterMovement();
@@ -1218,6 +1240,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
     case EMove::Axe: BladeContact(0.25f, 0.42f, 22, 34, 3); break;
     case EMove::Sword: BladeContact(0.14f, 0.24f, 16, 22, 2); break;
     case EMove::Dodge:
+        Player().StopJumping();
         if (Branch() == 'V' && Age >= BackstepImmunity) SetFlag(TEXT("bDodging"), false);
         break;
     case EMove::Leap:
@@ -1770,11 +1793,15 @@ void UFSClassCombat::QueueSecondRelease() { RequestedInputs |= 1 << 5; }
 
 void UFSClassCombat::JumpPressed()
 {
-    bJumpForwarded = !Unavailable() && !bSelecting && Move == EMove::Idle;
+    bJumpForwarded = !Unavailable() && !bSelecting && Move == EMove::Idle && !bDodgeJumpLocked;
     if (bJumpForwarded)
     {
         if (Player().CanJump()) PlaySharedSound(TEXT("Takeoff"));
         Player().Jump();
+    }
+    else if (Move == EMove::Dodge || bDodgeJumpLocked)
+    {
+        Player().StopJumping();
     }
 }
 
