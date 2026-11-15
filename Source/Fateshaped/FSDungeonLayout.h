@@ -102,9 +102,6 @@ private:
     UPROPERTY()
     TObjectPtr<UMaterialInterface> StormCloudMaterial;
 
-    UPROPERTY()
-    TObjectPtr<UMaterialInterface> StormConduitMaterial;
-
     UPROPERTY(Transient)
     TArray<TObjectPtr<UPointLightComponent>> StormFlashLights;
 

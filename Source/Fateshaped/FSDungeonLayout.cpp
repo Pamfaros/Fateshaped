@@ -137,7 +137,6 @@ AFSDungeonLayout::AFSDungeonLayout()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Telegraph(TEXT("/Game/Combat/FX/MI_FX_Telegraph.MI_FX_Telegraph"));
     static const ConstructorHelpers::FObjectFinder<UMaterialInterface> Cloud(TEXT("/Game/Dungeon/Materials/M_FS_StormCloud.M_FS_StormCloud"));
-    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> Conduit(TEXT("/Game/Dungeon/Materials/M_FS_StormConduit.M_FS_StormConduit"));
     TrapPlateMesh = Cube.Object;
     ClosedChestClass = ClosedChest.Class;
     OpenChestClass = OpenChest.Class;
@@ -145,7 +144,6 @@ AFSDungeonLayout::AFSDungeonLayout()
     FumeMesh = Sphere.Object;
     TelegraphMaterial = Telegraph.Object;
     StormCloudMaterial = Cloud.Object;
-    StormConduitMaterial = Conduit.Object;
 }
 
 AActor* AFSDungeonLayout::SpawnModule(int32 Module, const FTransform& Transform)
@@ -440,7 +438,7 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
 
 void AFSDungeonLayout::BuildStormCeiling()
 {
-    if (!StormCloudMaterial || !StormConduitMaterial || !TrapPlateMesh) return;
+    if (!StormCloudMaterial) return;
 
     FStormCeiling Storm;
     for (AActor* Module : SpawnedModules)
@@ -449,21 +447,7 @@ void AFSDungeonLayout::BuildStormCeiling()
         {
             return Class == Module->GetClass();
         });
-        if (Shape == INDEX_NONE || Shape == WallPlug) continue;
-        if (Shape == FinalGate)
-        {
-            // These last sections of the seal's circuit disappear with the gate.
-            FStormCeiling GateFeed;
-            const FTransform& Frame = Module->GetActorTransform();
-            for (const double Side : {-1.0, 1.0})
-            {
-                const FVector Start = Frame.TransformPosition(FVector(25.0, Side * 83.0, 355.0));
-                const FVector End = Frame.TransformPosition(FVector(25.0, Side * 120.0, 485.0));
-                GateFeed.AddConduit(Start, End, 6.0);
-            }
-            GateFeed.RegisterConduits(*Module, *TrapPlateMesh, *StormConduitMaterial);
-            continue;
-        }
+        if (Shape == INDEX_NONE || Shape >= WallPlug) continue;
 
         const UStaticMeshComponent* Geometry = nullptr;
         double LargestArea = 0.0;
@@ -491,30 +475,18 @@ void AFSDungeonLayout::BuildStormCeiling()
             Storm.Cover(Center, MeshFrame.TransformVector(FVector::ForwardVector), FVector2D(Size.X, Size.Y), WallTop);
         }
 
-        for (const FName Tag : DoorTags)
+        else
         {
-            const USceneComponent* Point = FindModulePoint(*Module, Tag);
-            if (!Point) continue;
-            const FTransform Port = Point->GetComponentTransform();
-            const FVector Mouth = Port.GetLocation();
-            const FVector Outward = Port.TransformVector(FVector::ForwardVector).GetSafeNormal2D();
-            const FVector Right = FVector::CrossProduct(FVector::UpVector, Outward);
-            const double HalfWidth = DoorWidth * 0.5 * FMath::Abs(Port.GetScale3D().Y);
-            if (!bRoom && Shape != Straight)
+            for (const FName Tag : DoorTags)
             {
+                const USceneComponent* Point = FindModulePoint(*Module, Tag);
+                if (!Point) continue;
+                const FTransform& Port = Point->GetComponentTransform();
+                const FVector Mouth = Port.GetLocation();
+                const FVector Outward = Port.TransformVector(FVector::ForwardVector).GetSafeNormal2D();
+                const double HalfWidth = DoorWidth * 0.5 * FMath::Abs(Port.GetScale3D().Y);
                 const double Arm = FMath::Abs(FVector::DotProduct(Mouth - Module->GetActorLocation(), Outward));
                 Storm.Cover(Mouth - Outward * (Arm * 0.5), Outward, FVector2D(Arm * 0.5 + 55.0, HalfWidth + 92.0), WallTop);
-            }
-            for (const double Side : {-1.0, 1.0})
-            {
-                const FVector Edge = Mouth + Right * Side * (bRoom ? HalfWidth + 7.0 : HalfWidth - 31.0);
-                const FVector A = Edge - Outward * 36.0 + FVector(0.0, 0.0, 154.0);
-                const FVector B = A - Outward * 20.0 + FVector(0.0, 0.0, 91.0);
-                const FVector C = bRoom
-                    ? B + Right * Side * 24.0 + FVector(0.0, 0.0, 84.0)
-                    : B - Outward * 142.0 + FVector(0.0, 0.0, 13.0);
-                Storm.AddConduit(A, B, 4.0);
-                Storm.AddConduit(B, C, 4.0);
             }
         }
 
@@ -528,7 +500,6 @@ void AFSDungeonLayout::BuildStormCeiling()
     }
 
     Storm.RegisterCloud(*this, *StormCloudMaterial);
-    Storm.RegisterConduits(*this, *TrapPlateMesh, *StormConduitMaterial);
 }
 
 bool AFSDungeonLayout::Build(int32 RunId)

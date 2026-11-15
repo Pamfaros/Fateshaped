@@ -1,7 +1,5 @@
 #include "FSStormCeiling.h"
 
-#include "Components/InstancedStaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
@@ -38,19 +36,6 @@ double BillowDepth(FVector2D Position)
     }
     return Depth + 42.0 * FMath::PerlinNoise2D(Position / 150.0) + 16.0 * FMath::PerlinNoise2D(Position / 70.0);
 }
-
-UInstancedStaticMeshComponent* CreateInstances(AActor& Owner, FName Name, UStaticMesh& Mesh, UMaterialInterface& Material)
-{
-    auto* Component = NewObject<UInstancedStaticMeshComponent>(&Owner, Name);
-    Component->SetupAttachment(Owner.GetRootComponent());
-    Component->SetStaticMesh(&Mesh);
-    Component->SetMaterial(0, &Material);
-    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Component->SetCanEverAffectNavigation(false);
-    Component->SetCastShadow(false);
-    Component->RegisterComponent();
-    return Component;
-}
 }
 
 void FStormCeiling::Cover(FVector Center, FVector Forward, FVector2D HalfSize, double WallTop)
@@ -80,25 +65,6 @@ void FStormCeiling::Cover(FVector Center, FVector Forward, FVector2D HalfSize, d
             double& Height = RoofCells.FindOrAdd(Key, WallTop);
             Height = FMath::Min(Height, WallTop);
         }
-    }
-}
-
-void FStormCeiling::AddConduit(FVector Start, FVector End, double Width)
-{
-    const FVector Span = End - Start;
-    const FVector Across = FVector::CrossProduct(Span, FVector::UpVector).GetSafeNormal();
-    FRandomStream Random(static_cast<int32>(GetTypeHash(Start)));
-    FVector Previous = Start;
-    constexpr int32 Segments = 4;
-    for (int32 Index = 1; Index <= Segments; ++Index)
-    {
-        const double Alpha = static_cast<double>(Index) / Segments;
-        const FVector At = Index == Segments ? End : Start + Span * Alpha + Across * Random.FRandRange(-8.0f, 8.0f);
-        const FVector Segment = At - Previous;
-        const double Thickness = Width * FMath::Lerp(1.0, 0.52, Alpha);
-        ConduitSegments.Emplace(Segment.Rotation(), (Previous + At) * 0.5,
-            FVector(Segment.Size() + Thickness, Thickness, Thickness) / 100.0);
-        Previous = At;
     }
 }
 
@@ -180,11 +146,4 @@ void FStormCeiling::RegisterCloud(AActor& Owner, UMaterialInterface& Material) c
     for (FVector& Normal : Normals) Normal.Normalize();
     Cloud->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, {}, {}, {}, true);
     Cloud->SetMaterial(0, &Material);
-}
-
-void FStormCeiling::RegisterConduits(AActor& Owner, UStaticMesh& Cube, UMaterialInterface& Material) const
-{
-    if (ConduitSegments.IsEmpty()) return;
-    auto* Conduits = CreateInstances(Owner, TEXT("StormConduits"), Cube, Material);
-    Conduits->AddInstances(ConduitSegments, false, true, false);
 }

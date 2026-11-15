@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-147 adds the Crypt storm ceiling and magical lighting. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-148 keeps the Crypt lighting and removes the visible wall lightning. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -98,6 +98,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-145 · Shorter room-to-room corridors — COMPILED + PIE_TESTED.** Compare door-aligned layouts with the standard plan and prefer less corridor travel. Shorten the boss-to-portal link to one native straight. All 256 seeded plans passed. In two rendered seeds, the longest straight run dropped from 82.4 to 19.8 m and from 60.9 to 23.3 m. Packaged testing remains pending.
 - **FS-146 · Six-room dense Crypt — COMPILED + PIE_TESTED.** Generate six rooms including the exit on the dense −8 through +8 room field. Keep one trap, the cache, the guardian and the boss. The 256-seed test and one successful scripted PIE expedition verified placement, chest rewards, portal completion and Guild return. Packaged testing remains pending.
 - **FS-147 · Crypt storm ceiling — COMPILED + PIE_TESTED.** Generate a continuous storm roof and collidable upper boundary over the module footprints. Light the Crypt with magical conduits and pulses. The full scripted expedition passed, with 114 roof coverage samples and a measured lighting pulse. Bent and T modules were absent in sampled compact plans. Packaged testing remains pending.
+- **FS-148 · Invisible Crypt light sources — COMPILED + PIE_TESTED.** Remove the generated wall and gate-feed meshes. Retain the 26 point lights and their pulses in the tested layout. Verified zero conduit meshes and a complete scripted expedition. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 
