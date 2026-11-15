@@ -98,8 +98,5 @@ private:
     UPROPERTY()
     TObjectPtr<UMaterialInterface> TelegraphMaterial;
 
-    UPROPERTY()
-    TObjectPtr<UMaterialInterface> ConnectorMaterial;
-
     FVector ExitCenter = FVector::ZeroVector;
 };

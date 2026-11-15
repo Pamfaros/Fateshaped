@@ -66,10 +66,15 @@ bool HasSpacedCorners(const FPlan& Plan)
     return true;
 }
 
+bool IsStraight(uint8 Openings)
+{
+    return Openings == 0b0101 || Openings == 0b1010;
+}
+
 namespace
 {
 constexpr int32 RoomCount = 8;
-constexpr int32 RoomMargin = 3;
+constexpr int32 RoomMargin = 2;
 constexpr int32 MaxRouteBends = 4;
 constexpr int32 StepsBetweenBends = MinStraightTilesBetweenCorners + 1;
 
@@ -117,7 +122,7 @@ bool PlaceRooms(FRandomStream& Random, TArray<FRoom>& Rooms)
     Rooms.Add({FIntPoint::ZeroValue, NormalHalfSize, ERoomRole::Entrance});
     for (int32 Attempt = 0; Attempt < 220 && Rooms.Num() < RoomCount; ++Attempt)
     {
-        const FRoom Candidate{{Random.RandRange(0, 31), Random.RandRange(-15, 15)}, NormalHalfSize};
+        const FRoom Candidate{{Random.RandRange(0, 23), Random.RandRange(-11, 11)}, NormalHalfSize};
         if (Fits(Rooms, Candidate, RoomMargin))
         {
             Rooms.Add(Candidate);
@@ -202,14 +207,15 @@ bool PlaceExit(FPlan& Plan, int32 Boss, FRoomTiles& RoomTiles, TSet<FIntPoint>& 
     for (const FIntPoint Direction : Directions)
     {
         const FIntPoint Door = DoorTile(Arena, Direction) + Direction;
-        const FRoom Exit{Door + Direction * 4, ExitHalfSize, ERoomRole::Exit};
+        constexpr int32 ExitPathLength = 2;
+        const FRoom Exit{Door + Direction * (ExitPathLength + ExitHalfSize.X), ExitHalfSize, ERoomRole::Exit};
         if (!Fits(Plan.Rooms, Exit, 1))
         {
             continue;
         }
 
         TSet<FIntPoint> Throat;
-        for (int32 Step = 0; Step < 3; ++Step)
+        for (int32 Step = 0; Step < ExitPathLength; ++Step)
         {
             Throat.Add(Door + Direction * Step);
         }
@@ -345,7 +351,7 @@ TArray<FIntPoint> RouteBetweenPorts(const FPlan& Plan, const FRoomTiles& RoomTil
             const bool bBend = Side != Step.Side;
             const FStep Candidate{Next, Side, bBend ? 1 : FMath::Min(StepsBetweenBends, Step.StraightSteps + 1),
                 Step.Bends + (bBend ? 1 : 0), Index};
-            if (Next.X < -10 || Next.X > 41 || FMath::Abs(Next.Y) > 25 || Seen.Contains(Candidate.Key())
+            if (Next.X < -7 || Next.X > 30 || FMath::Abs(Next.Y) > 18 || Seen.Contains(Candidate.Key())
                 || RoomTiles.Contains(Next)
                 || !CanCarveTile(Plan, RoomTiles, Reserved, Next, A, B, Goals.Contains(Next) ? Junction : nullptr))
             {
@@ -540,6 +546,7 @@ bool Build(FRandomStream& Random, FPlan& Plan)
     {
         Shortcuts.Swap(Index, Random.RandRange(0, Index));
     }
+    Shortcuts.StableSort([](const FEdge& A, const FEdge& B) { return A.Weight < B.Weight; });
     for (const FEdge& Edge : Shortcuts)
     {
         if (Regions[Edge.A] != Regions[Edge.B] || Edge.A == Boss || Edge.B == Boss
@@ -569,7 +576,20 @@ bool Build(FRandomStream& Random, FPlan& Plan)
         const uint8 Openings = CorridorOpenings(Plan, Tile);
         const int32 Degree = FMath::CountBits(static_cast<uint32>(Openings));
         if (Degree < 2 || Degree > 3) return false;
-        Plan.Corners += Degree == 2 && Openings != 0b0101 && Openings != 0b1010;
+        if (!IsStraight(Openings))
+        {
+            // Adjacent turn and T cells crowd the same footprint. A room port has space for a fitted straight.
+            for (int32 Side = 0; Side < UE_ARRAY_COUNT(Directions); ++Side)
+            {
+                const FIntPoint Neighbor = Tile + Directions[Side];
+                if ((Openings & (1 << Side)) && Plan.Corridors.Contains(Neighbor)
+                    && !IsStraight(CorridorOpenings(Plan, Neighbor)))
+                {
+                    return false;
+                }
+            }
+        }
+        Plan.Corners += Degree == 2 && !IsStraight(Openings);
         Plan.Junctions += Degree == 3;
     }
 

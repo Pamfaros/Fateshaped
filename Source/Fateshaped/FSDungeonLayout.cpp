@@ -13,14 +13,12 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "ProceduralMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
 
 namespace
 {
 constexpr double DoorWidth = 240.0;
-constexpr double WallHeight = 460.0;
 using FSDungeon::ERoomRole;
 using FSDungeon::FRoom;
 const FName LayoutAttemptedTag(TEXT("FS_DungeonLayoutAttempted"));
@@ -42,57 +40,6 @@ FIntVector PortKey(FIntPoint Tile, int32 Side)
 {
     return {Tile.X, Tile.Y, Side};
 }
-
-struct FConnectorMesh
-{
-    TArray<FVector> Vertices;
-    TArray<int32> Triangles;
-    TArray<FVector> Normals;
-    TArray<FVector2D> UVs;
-    TArray<FProcMeshTangent> Tangents;
-
-    void AddLoft(const FTransform& A, const FTransform& B, double MinY, double MaxY, double MinZ, double MaxZ)
-    {
-        const auto Edge = [](const FTransform& Port, double Side, double Height)
-        {
-            const FVector Forward = Port.GetRotation().GetForwardVector().GetSafeNormal2D();
-            const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
-            return Port.GetLocation() - Forward * 3.0
-                + Right * (Side * FMath::Abs(Port.GetScale3D().Y))
-                + FVector(0, 0, Height * FMath::Abs(Port.GetScale3D().Z));
-        };
-        const FVector Points[] = {
-            Edge(A, MinY, MinZ), Edge(A, MaxY, MinZ), Edge(A, MaxY, MaxZ), Edge(A, MinY, MaxZ),
-            Edge(B, -MinY, MinZ), Edge(B, -MaxY, MinZ), Edge(B, -MaxY, MaxZ), Edge(B, -MinY, MaxZ)
-        };
-        const FVector Center = (Points[0] + Points[6]) * 0.5;
-        constexpr int32 Faces[][4] = {{0,1,2,3}, {4,5,6,7}, {0,1,5,4}, {1,2,6,5}, {2,3,7,6}, {3,0,4,7}};
-        for (const auto& Face : Faces)
-        {
-            const int32 Base = Vertices.Num();
-            const FVector P0 = Points[Face[0]], P1 = Points[Face[1]], P2 = Points[Face[2]], P3 = Points[Face[3]];
-            const FVector Normal = FVector::CrossProduct(P2 - P0, P1 - P0).GetSafeNormal();
-            const bool bOutward = FVector::DotProduct(Normal, (P0 + P1 + P2 + P3) * 0.25 - Center) > 0;
-            Vertices.Append({P0, P1, P2, P3});
-            if (bOutward) Triangles.Append({Base, Base + 1, Base + 2, Base, Base + 2, Base + 3});
-            else Triangles.Append({Base, Base + 2, Base + 1, Base, Base + 3, Base + 2});
-            const double U = FVector::Distance(P0, P1) / DoorWidth;
-            const double V = FVector::Distance(P0, P3) / DoorWidth;
-            UVs.Append({{0,0}, {U,0}, {U,V}, {0,V}});
-            for (int32 Vertex = 0; Vertex < 4; ++Vertex)
-            {
-                Normals.Add(bOutward ? Normal : -Normal);
-                Tangents.Emplace((P1 - P0).GetSafeNormal(), false);
-            }
-        }
-    }
-
-    void AddSection(UProceduralMeshComponent& Mesh, int32 Index, UMaterialInterface* Material) const
-    {
-        Mesh.CreateMeshSection_LinearColor(Index, Vertices, Triangles, Normals, UVs, {}, Tangents, true);
-        Mesh.SetMaterial(Index, Material);
-    }
-};
 
 uint8 RotateOpenings(uint8 Mask, int32 Turns)
 {
@@ -187,8 +134,6 @@ AFSDungeonLayout::AFSDungeonLayout()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cone(TEXT("/Engine/BasicShapes/Cone.Cone"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Telegraph(TEXT("/Game/Combat/FX/MI_FX_Telegraph.MI_FX_Telegraph"));
-    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> Stone(TEXT("/Game/Dungeon/Materials/M_FS_Connector_Stone.M_FS_Connector_Stone"));
-    ConnectorMaterial = Stone.Object;
     TrapPlateMesh = Cube.Object;
     ClosedChestClass = ClosedChest.Class;
     OpenChestClass = OpenChest.Class;
@@ -279,8 +224,8 @@ bool AFSDungeonLayout::HasLivingCryptEnemies(const AActor* Player)
 bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePitch, TArray<FVector2D>& RoomExtents)
 {
     FVector2D Extents[WallPlug];
-    double Clearance = 0;
-    // Measure the actual component hierarchy without using any visual mesh bounds.
+    FVector StraightMouths[2]{FVector::ZeroVector, FVector::ZeroVector};
+    // Measure the actual component hierarchy without using visual mesh bounds.
     for (int32 Shape = NormalRoom; Shape < WallPlug; ++Shape)
     {
         AActor* Probe = SpawnModule(Shape, FTransform(FVector(0, 0, -100000)));
@@ -291,33 +236,49 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         for (int32 Side = 0; Side < UE_ARRAY_COUNT(DoorTags); ++Side)
         {
             const USceneComponent* Door = FindModulePoint(*Probe, DoorTags[Side]);
-            if (!Door) continue;
+            if (!Door)
+            {
+                if (Shape == Straight && Side % 2 == 0) return false;
+                continue;
+            }
             const FTransform Local = Door->GetComponentTransform().GetRelativeTransform(ProbeFrame);
             const FVector Position = Local.GetLocation();
             const FVector HalfMouth = Local.GetRotation().GetRightVector().GetSafeNormal2D()
                 * (DoorWidth * 0.5 * FMath::Abs(Local.GetScale3D().Y));
             Extents[Shape].X = FMath::Max(Extents[Shape].X, FMath::Abs(Position.X) + FMath::Abs(HalfMouth.X));
             Extents[Shape].Y = FMath::Max(Extents[Shape].Y, FMath::Abs(Position.Y) + FMath::Abs(HalfMouth.Y));
-            const double Slide = FMath::Abs(Side % 2 == 0 ? Position.Y : Position.X);
-            if (Slide > 0.1 || FMath::Abs(Position.Z) > 0.1 || !Local.GetScale3D().Equals(FVector::OneVector))
+            if (Shape == Straight && Side % 2 == 0)
             {
-                Clearance = FMath::Max(Clearance, FMath::Max(40.0 + 0.65 * Slide, 4.0 * FMath::Abs(Position.Z)));
+                StraightMouths[Side / 2] = Position;
             }
         }
         Probe->Destroy();
         SpawnedModules.Pop();
-        const double HalfCells = Shape == NormalRoom ? FSDungeon::NormalHalfSize.X + 0.5
-            : Shape == BossRoom ? FSDungeon::BossHalfSize.X + 0.5
-            : Shape == ExitRoom ? FSDungeon::ExitHalfSize.X + 0.5 : 0.5;
-        TilePitch = FMath::Max(TilePitch, FMath::Max(Extents[Shape].X, Extents[Shape].Y) / HalfCells);
+        if (Shape != Straight)
+        {
+            TilePitch = FMath::Max(TilePitch, FMath::Max(Extents[Shape].X, Extents[Shape].Y));
+        }
     }
-    TilePitch += Clearance;
+    // Room centers reserve a 3-by-3 footprint. Turns and junctions have at least one straight cell between them.
+    TilePitch += 110.0;
+    const FVector LocalSpan = StraightMouths[0] - StraightMouths[1];
+    if (LocalSpan.X <= UE_SMALL_NUMBER || !FMath::IsNearlyZero(LocalSpan.Y, 0.1)
+        || !FMath::IsNearlyZero(LocalSpan.Z, 0.1))
+    {
+        return false;
+    }
 
     TMap<FIntVector, FTransform> Ports;
+    const auto SpawnFittedModule = [&](int32 Shape, const FQuat& Rotation, const FVector& Location, const FVector& Scale)
+    {
+        AActor* Module = SpawnModule(Shape, FTransform(Rotation, Location));
+        if (Module) Module->SetActorScale3D(Module->GetActorScale3D() * Scale);
+        return Module;
+    };
     const auto Seal = [&](int32 Shape, const FTransform& Port)
     {
         const FVector Scale(1, FMath::Abs(Port.GetScale3D().Y), FMath::Abs(Port.GetScale3D().Z));
-        return SpawnModule(Shape, FTransform(Port.GetRotation(), Port.GetLocation(), Scale));
+        return SpawnFittedModule(Shape, Port.GetRotation(), Port.GetLocation(), Scale);
     };
     const FRotator GateRotation = FVector(Plan.ExitDirection.X, Plan.ExitDirection.Y, 0).Rotation();
     for (const FRoom& Room : Plan.Rooms)
@@ -360,6 +321,7 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
     {
         double Yaw = 0;
         const uint8 Openings = FSDungeon::CorridorOpenings(Plan, Tile);
+        if (FSDungeon::IsStraight(Openings)) continue;
         bool bMirrored = false;
         const EModule Shape = CorridorModule(Openings, BendsPlaced % 2 != 0, Yaw, bMirrored);
         if (Shape == WallPlug) return false;
@@ -390,40 +352,60 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
         }
     }
 
-    FConnectorMesh FloorMesh, WallMesh;
-    int32 Connectors = 0;
+    int32 StraightRuns = 0;
+    const auto FitStraight = [&](const FTransform& StartPort, const FTransform& EndPort, FIntPoint Direction)
+    {
+        const FVector Start = StartPort.GetLocation();
+        const FVector Span = EndPort.GetLocation() - Start;
+        if (FVector::DotProduct(Span, FVector(Direction.X, Direction.Y, 0)) <= 0.0) return false;
+        // Overlap uneven mouth edges so the authored collision remains continuous.
+        constexpr double MouthOverlap = 22.0;
+        const FVector Axis = Span.GetSafeNormal();
+        const FVector Scale((Span.Size() + 2.0 * MouthOverlap) / LocalSpan.X, 1, 1);
+        const FQuat Rotation = FRotationMatrix::MakeFromXZ(Axis, FVector::UpVector).ToQuat();
+        const FVector Origin = Start - Axis * MouthOverlap - Rotation.RotateVector(StraightMouths[1] * Scale);
+        if (!SpawnFittedModule(Straight, Rotation, Origin, Scale)) return false;
+        ++StraightRuns;
+        return true;
+    };
+    for (const FIntPoint Tile : Plan.Corridors)
+    {
+        const uint8 Openings = FSDungeon::CorridorOpenings(Plan, Tile);
+        if (!FSDungeon::IsStraight(Openings)) continue;
+        const int32 Side = Openings == 0b0101 ? 0 : 1;
+        const FIntPoint Direction = FSDungeon::Directions[Side];
+        const auto ContinuesRun = [&](FIntPoint Point)
+        {
+            return Plan.Corridors.Contains(Point) && FSDungeon::CorridorOpenings(Plan, Point) == Openings;
+        };
+        if (ContinuesRun(Tile - Direction)) continue;
+
+        FIntPoint End = Tile + Direction;
+        while (ContinuesRun(End)) End += Direction;
+
+        const FTransform* StartPort = Ports.Find(PortKey(Tile - Direction, Side));
+        const FTransform* EndPort = Ports.Find(PortKey(End, (Side + 2) % 4));
+        if (!StartPort || !EndPort || !FitStraight(*StartPort, *EndPort, Direction)) return false;
+    }
+    // A route can bend at its first cell outside a room. Fit the same authored straight to that short span.
     for (const auto& Entry : Ports)
     {
         const int32 Side = Entry.Key.Z;
+        if (Side >= 2) continue;
         const FIntPoint Tile(Entry.Key.X, Entry.Key.Y);
-        const FTransform* Mate = Ports.Find(PortKey(Tile + FSDungeon::Directions[Side], (Side + 2) % 4));
-        if (!Mate) return false;
-        // Visit each seam once, from its positive-axis port.
-        if (Side >= 2 || Entry.Value.GetLocation().Equals(Mate->GetLocation(), 0.1)) continue;
-        constexpr double HalfWidth = DoorWidth * 0.5;
-        FloorMesh.AddLoft(Entry.Value, *Mate, -HalfWidth, HalfWidth, -40, 0);
-        WallMesh.AddLoft(Entry.Value, *Mate, -HalfWidth - 12, -HalfWidth + 12, 0, WallHeight);
-        WallMesh.AddLoft(Entry.Value, *Mate, HalfWidth - 12, HalfWidth + 12, 0, WallHeight);
-        ++Connectors;
+        const FIntPoint Direction = FSDungeon::Directions[Side];
+        if (const FTransform* Mate = Ports.Find(PortKey(Tile + Direction, (Side + 2) % 4)))
+        {
+            if (!FitStraight(Entry.Value, *Mate, Direction)) return false;
+        }
     }
-    if (Connectors > 0)
-    {
-        auto* Mesh = NewObject<UProceduralMeshComponent>(this, TEXT("AdaptiveCorridorSeams"));
-        Mesh->SetupAttachment(GetRootComponent());
-        Mesh->SetCanEverAffectNavigation(false);
-        Mesh->SetCollisionProfileName(TEXT("BlockAll"));
-        Mesh->SetGenerateOverlapEvents(false);
-        Mesh->RegisterComponent();
-        FloorMesh.AddSection(*Mesh, 0, ConnectorMaterial);
-        WallMesh.AddSection(*Mesh, 1, ConnectorMaterial);
-    }
-    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt fitted %.1f cm grid spacing and %d adaptive corridor seams."), TilePitch, Connectors);
+    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt fitted %.1f cm grid spacing and %d straight corridor modules."), TilePitch, StraightRuns);
     return true;
 }
 
 bool AFSDungeonLayout::Build(int32 RunId)
 {
-    if (ModuleClasses.Contains(nullptr) || !ConnectorMaterial)
+    if (ModuleClasses.Contains(nullptr))
     {
         return false;
     }
