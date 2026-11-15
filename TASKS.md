@@ -1,6 +1,8 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-148 keeps the Crypt lighting and removes the visible wall lightning. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-149 archives the current Windows build and verifies Guild startup. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+
+- **Essence shimmer — COMPILED, Niagara editor preview observed.** `/Game/VFX/NS_Essences` with `/Game/VFX/M_Essences` spawns a local-space mote cloud that cycles red, yellow, and blue. It is not placed in a level. PIE and the Windows package are **NOT_TESTED**.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 

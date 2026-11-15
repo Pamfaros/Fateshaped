@@ -395,3 +395,12 @@ Add a short entry per checkpoint or blocker, newest first. Capture the test resu
 
 - Removed generated lightning meshes from walls, door arches and the gate frame. Retained the point lights and their storm pulses. Removed `M_FS_StormConduit` through Unreal Editor Python after confirming the material had no asset referencers. Unreal MCP was unavailable.
 - **COMPILED / PIE_TESTED:** the Win64 Editor built. Rendered PIE confirmed zero generated conduit meshes, 26 live point lights, a measured pulse and 114 covered roof samples. The scripted expedition earned the chest and quest rewards and returned to the Guild. See `Saved/FS115QA/Storm148Verified.json`. The Windows package remains **NOT_TESTED**. Proposed checkpoint `fix(dungeon): keep lighting without wall lightning meshes`. Next P0 is the packaged contract loop and save reload.
+
+## 2026-11-15 · FS-149 Current Windows package
+
+- **COMPILED / PACKAGED_TESTED (startup):** Win64 Development BuildCookRun cooked the Guild and Forgotten Crypt maps and archived the staged build. The executable loaded the Guild with graphics enabled on an isolated profile. The ZIP contains the launcher and IoStore containers and is 985,924,204 bytes. See `Saved/PackagedBuild/FS149/Fateshaped_FS149_Win64.zip`, `Build.log` and `WindowsSmoke.log`. Full normal-input expedition and save reload remain **NOT_TESTED**. Proposed checkpoint `docs(release): record the current Windows build`.
+
+## 2026-11-15 · Essence shimmer VFX
+
+- Rebuilt the existing `/Game/VFX/NS_Essences` emitter and `/Game/VFX/M_Essences`. The material is unlit additive and masks sprites with a soft radial falloff times particle color. The system spawns about 28 motes per second inside a 32 cm sphere, drifts them outward, and pulls them back toward the origin in local space. Lifetime is random from 1.6 to 2.6 seconds. Particle color cycles red, yellow, and blue twice per lifetime, with a position phase offset, and fades in and out.
+- **COMPILED:** Niagara reported the system up to date with no errors after the final color expression. The Niagara editor preview showed red, yellow, and blue motes together. A temporary Guild preview actor was removed and `L_Guild` was not saved. PIE and the Windows package are **NOT_TESTED**. Proposed checkpoint `feat(vfx): add a three-color essence shimmer`. Next P0 remains the packaged contract loop and save reload.
