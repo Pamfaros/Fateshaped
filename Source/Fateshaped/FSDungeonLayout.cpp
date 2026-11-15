@@ -2,6 +2,7 @@
 #include "FSDungeonPlan.h"
 #include "FSRewardLibrary.h"
 #include "FSCryptEnemy.h"
+#include "FSStormCeiling.h"
 
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -135,12 +136,16 @@ AFSDungeonLayout::AFSDungeonLayout()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cone(TEXT("/Engine/BasicShapes/Cone.Cone"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Telegraph(TEXT("/Game/Combat/FX/MI_FX_Telegraph.MI_FX_Telegraph"));
+    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> Cloud(TEXT("/Game/Dungeon/Materials/M_FS_StormCloud.M_FS_StormCloud"));
+    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> Conduit(TEXT("/Game/Dungeon/Materials/M_FS_StormConduit.M_FS_StormConduit"));
     TrapPlateMesh = Cube.Object;
     ClosedChestClass = ClosedChest.Class;
     OpenChestClass = OpenChest.Class;
     SpikeMesh = Cone.Object;
     FumeMesh = Sphere.Object;
     TelegraphMaterial = Telegraph.Object;
+    StormCloudMaterial = Cloud.Object;
+    StormConduitMaterial = Conduit.Object;
 }
 
 AActor* AFSDungeonLayout::SpawnModule(int32 Module, const FTransform& Transform)
@@ -433,6 +438,99 @@ bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePi
     return true;
 }
 
+void AFSDungeonLayout::BuildStormCeiling()
+{
+    if (!StormCloudMaterial || !StormConduitMaterial || !TrapPlateMesh) return;
+
+    FStormCeiling Storm;
+    for (AActor* Module : SpawnedModules)
+    {
+        const int32 Shape = ModuleClasses.IndexOfByPredicate([Module](const TSubclassOf<AActor>& Class)
+        {
+            return Class == Module->GetClass();
+        });
+        if (Shape == INDEX_NONE || Shape == WallPlug) continue;
+        if (Shape == FinalGate)
+        {
+            // These last sections of the seal's circuit disappear with the gate.
+            FStormCeiling GateFeed;
+            const FTransform& Frame = Module->GetActorTransform();
+            for (const double Side : {-1.0, 1.0})
+            {
+                const FVector Start = Frame.TransformPosition(FVector(25.0, Side * 83.0, 355.0));
+                const FVector End = Frame.TransformPosition(FVector(25.0, Side * 120.0, 485.0));
+                GateFeed.AddConduit(Start, End, 6.0);
+            }
+            GateFeed.RegisterConduits(*Module, *TrapPlateMesh, *StormConduitMaterial);
+            continue;
+        }
+
+        const UStaticMeshComponent* Geometry = nullptr;
+        double LargestArea = 0.0;
+        TInlineComponentArray<UStaticMeshComponent*> Meshes(Module);
+        for (const UStaticMeshComponent* Mesh : Meshes)
+        {
+            const FVector Extent = Mesh->Bounds.BoxExtent;
+            const double Area = Extent.X * Extent.Y;
+            if (Mesh->GetStaticMesh() && Area > LargestArea)
+            {
+                Geometry = Mesh;
+                LargestArea = Area;
+            }
+        }
+        if (!Geometry) continue;
+
+        const FTransform& MeshFrame = Geometry->GetComponentTransform();
+        const FBoxSphereBounds LocalMesh = Geometry->GetStaticMesh()->GetBounds();
+        const FVector Size = LocalMesh.BoxExtent * MeshFrame.GetScale3D().GetAbs();
+        const FVector Center = MeshFrame.TransformPosition(LocalMesh.Origin);
+        const double WallTop = Geometry->Bounds.GetBox().Max.Z;
+        const bool bRoom = Shape < Straight;
+        if (bRoom || Shape == Straight)
+        {
+            Storm.Cover(Center, MeshFrame.TransformVector(FVector::ForwardVector), FVector2D(Size.X, Size.Y), WallTop);
+        }
+
+        for (const FName Tag : DoorTags)
+        {
+            const USceneComponent* Point = FindModulePoint(*Module, Tag);
+            if (!Point) continue;
+            const FTransform Port = Point->GetComponentTransform();
+            const FVector Mouth = Port.GetLocation();
+            const FVector Outward = Port.TransformVector(FVector::ForwardVector).GetSafeNormal2D();
+            const FVector Right = FVector::CrossProduct(FVector::UpVector, Outward);
+            const double HalfWidth = DoorWidth * 0.5 * FMath::Abs(Port.GetScale3D().Y);
+            if (!bRoom && Shape != Straight)
+            {
+                const double Arm = FMath::Abs(FVector::DotProduct(Mouth - Module->GetActorLocation(), Outward));
+                Storm.Cover(Mouth - Outward * (Arm * 0.5), Outward, FVector2D(Arm * 0.5 + 55.0, HalfWidth + 92.0), WallTop);
+            }
+            for (const double Side : {-1.0, 1.0})
+            {
+                const FVector Edge = Mouth + Right * Side * (bRoom ? HalfWidth + 7.0 : HalfWidth - 31.0);
+                const FVector A = Edge - Outward * 36.0 + FVector(0.0, 0.0, 154.0);
+                const FVector B = A - Outward * 20.0 + FVector(0.0, 0.0, 91.0);
+                const FVector C = bRoom
+                    ? B + Right * Side * 24.0 + FVector(0.0, 0.0, 84.0)
+                    : B - Outward * 142.0 + FVector(0.0, 0.0, 13.0);
+                Storm.AddConduit(A, B, 4.0);
+                Storm.AddConduit(B, C, 4.0);
+            }
+        }
+
+        const FVector LightAt(Center.X, Center.Y, Module->GetActorLocation().Z + 275.0);
+        AddLight(*this, LightAt, FLinearColor(0.48f, 0.60f, 1.0f), bRoom ? 23500.0f : 8500.0f, bRoom ? 1600.0f : 1060.0f);
+        if (bRoom)
+        {
+            StormFlashLights.Add(AddLight(*this, FVector(Center.X, Center.Y, WallTop - 125.0),
+                FLinearColor(0.58f, 0.39f, 1.0f), 4300.0f, 1350.0f));
+        }
+    }
+
+    Storm.RegisterCloud(*this, *StormCloudMaterial);
+    Storm.RegisterConduits(*this, *TrapPlateMesh, *StormConduitMaterial);
+}
+
 bool AFSDungeonLayout::Build(int32 RunId)
 {
     if (ModuleClasses.Contains(nullptr))
@@ -449,6 +547,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
     TArray<FVector2D> RoomExtents;
     double TilePitch = 0;
     if (!BuildModules(Plan, TilePitch, RoomExtents)) return false;
+    BuildStormCeiling();
 
     FRandomStream Random(RunId);
     TArray<AFSCryptEnemy*> Spawned;
@@ -762,6 +861,12 @@ void AFSDungeonLayout::Tick(float DeltaSeconds)
     TryGrantKillExperience(*Player);
 
     const double Time = GetWorld()->GetTimeSeconds();
+    for (int32 Index = 0; Index < StormFlashLights.Num(); ++Index)
+    {
+        const double Phase = FMath::Frac((Time + 1.75 * Index) / 8.1);
+        const double Flash = FMath::Square(FMath::Max(0.0, 1.0 - 16.0 * FMath::Abs(Phase - 0.41)));
+        StormFlashLights[Index]->SetIntensity(static_cast<float>(4300.0 + 5200.0 * Flash));
+    }
     const FVector Position = Player->GetActorLocation();
     const double FeetZ = Position.Z - Player->GetSimpleCollisionHalfHeight();
     for (FTrap& Trap : Traps)

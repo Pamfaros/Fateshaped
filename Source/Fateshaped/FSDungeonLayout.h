@@ -37,6 +37,7 @@ private:
     virtual void Destroyed() override;
     bool Build(int32 RunId);
     bool BuildModules(const FSDungeon::FPlan& Plan, double& TilePitch, TArray<FVector2D>& RoomExtents);
+    void BuildStormCeiling();
     AActor* SpawnModule(int32 Module, const FTransform& Transform);
     void AddTrap(const FVector& Center, bool bSpikes, bool bAlongX);
     void AddChest(const FVector& Center);
@@ -97,6 +98,15 @@ private:
 
     UPROPERTY()
     TObjectPtr<UMaterialInterface> TelegraphMaterial;
+
+    UPROPERTY()
+    TObjectPtr<UMaterialInterface> StormCloudMaterial;
+
+    UPROPERTY()
+    TObjectPtr<UMaterialInterface> StormConduitMaterial;
+
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UPointLightComponent>> StormFlashLights;
 
     FVector ExitCenter = FVector::ZeroVector;
 };
