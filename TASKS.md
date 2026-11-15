@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-136 limits successive corridor bends in the Crypt. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-137 fits the Crypt's modules to authored doorway transforms. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -87,6 +87,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-134 · Live Arcane Spark aim — COMPILED + PIE_TESTED.** Sample the current camera after its update when Spark is emitted. In empty space, converge on the ray inside Spark's 550 cm range. Verified a camera turn during Mage's basic cast, clear air, wall blocking and the basic-attack suite. Packaged testing remains pending.
 - **FS-135 · Authored Crypt modules — COMPILED + PIE_TESTED.** Created nine editable Blueprints in `/Game/Dungeon/Modules`. Generation connects centered doors, rotates corridor pieces, and seals unused doorways. All 256 seeds passed the layout test. A scripted expedition verified door collision, the portal and return rewards. Packaged testing remains pending.
 - **FS-136 · Corridor bend spacing — COMPILED + PIE_TESTED.** Obstacle routing permits up to four bends per connection and requires two straight tiles between consecutive corners. All 256 seeds passed. Seed 1 dropped from 26 to 13 bends and completed a scripted expedition. Packaged testing remains pending.
+- **FS-137 · Adaptive module ports and final gate — COMPILED + PIE_TESTED.** Room and corridor transforms determine layout spacing, collidable seams, plug placement and the final gate. Added editor arrows at corridor ports. Verified the custom room, varied module dimensions and the exit unlock in PIE. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 

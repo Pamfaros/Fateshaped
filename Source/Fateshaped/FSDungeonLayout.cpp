@@ -7,19 +7,19 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "ProceduralMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
 
 namespace
 {
-constexpr double TileSize = 240.0;
+constexpr double DoorWidth = 240.0;
 constexpr double WallHeight = 460.0;
 using FSDungeon::ERoomRole;
 using FSDungeon::FRoom;
@@ -31,13 +31,69 @@ const FName FinalEncounterTag(TEXT("Enc2"));
 const FName DeathHandledTag(TEXT("FS_DeathHandled"));
 constexpr double ChestReach = 230.0;
 
-enum EModule : int32 { NormalRoom, BossRoom, ExitRoom, Straight, RightBend, LeftBend, TJunction, Cross, WallPlug };
+enum EModule : int32 { NormalRoom, BossRoom, ExitRoom, Straight, RightBend, LeftBend, TJunction, Cross, WallPlug, FinalGate };
 const FName DoorTags[] = {TEXT("FS_Door_PX"), TEXT("FS_Door_PY"), TEXT("FS_Door_NX"), TEXT("FS_Door_NY")};
 
-FVector TileCenter(const FIntPoint& Tile, double Height = 0.0)
+FVector TileCenter(const FIntPoint& Tile, double Pitch, double Height = 0.0)
 {
-    return FVector(Tile.X * TileSize, Tile.Y * TileSize, Height);
+    return FVector(Tile.X * Pitch, Tile.Y * Pitch, Height);
 }
+
+FIntVector PortKey(FIntPoint Tile, int32 Side)
+{
+    return {Tile.X, Tile.Y, Side};
+}
+
+struct FConnectorMesh
+{
+    TArray<FVector> Vertices;
+    TArray<int32> Triangles;
+    TArray<FVector> Normals;
+    TArray<FVector2D> UVs;
+    TArray<FProcMeshTangent> Tangents;
+
+    void AddLoft(const FTransform& A, const FTransform& B, double MinY, double MaxY, double MinZ, double MaxZ)
+    {
+        const auto Edge = [](const FTransform& Port, double Side, double Height)
+        {
+            const FVector Forward = Port.GetRotation().GetForwardVector().GetSafeNormal2D();
+            const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
+            return Port.GetLocation() - Forward * 3.0
+                + Right * (Side * FMath::Abs(Port.GetScale3D().Y))
+                + FVector(0, 0, Height * FMath::Abs(Port.GetScale3D().Z));
+        };
+        const FVector Points[] = {
+            Edge(A, MinY, MinZ), Edge(A, MaxY, MinZ), Edge(A, MaxY, MaxZ), Edge(A, MinY, MaxZ),
+            Edge(B, -MinY, MinZ), Edge(B, -MaxY, MinZ), Edge(B, -MaxY, MaxZ), Edge(B, -MinY, MaxZ)
+        };
+        const FVector Center = (Points[0] + Points[6]) * 0.5;
+        constexpr int32 Faces[][4] = {{0,1,2,3}, {4,5,6,7}, {0,1,5,4}, {1,2,6,5}, {2,3,7,6}, {3,0,4,7}};
+        for (const auto& Face : Faces)
+        {
+            const int32 Base = Vertices.Num();
+            const FVector P0 = Points[Face[0]], P1 = Points[Face[1]], P2 = Points[Face[2]], P3 = Points[Face[3]];
+            const FVector Normal = FVector::CrossProduct(P2 - P0, P1 - P0).GetSafeNormal();
+            const bool bOutward = FVector::DotProduct(Normal, (P0 + P1 + P2 + P3) * 0.25 - Center) > 0;
+            Vertices.Append({P0, P1, P2, P3});
+            if (bOutward) Triangles.Append({Base, Base + 1, Base + 2, Base, Base + 2, Base + 3});
+            else Triangles.Append({Base, Base + 2, Base + 1, Base, Base + 3, Base + 2});
+            const double U = FVector::Distance(P0, P1) / DoorWidth;
+            const double V = FVector::Distance(P0, P3) / DoorWidth;
+            UVs.Append({{0,0}, {U,0}, {U,V}, {0,V}});
+            for (int32 Vertex = 0; Vertex < 4; ++Vertex)
+            {
+                Normals.Add(bOutward ? Normal : -Normal);
+                Tangents.Emplace((P1 - P0).GetSafeNormal(), false);
+            }
+        }
+    }
+
+    void AddSection(UProceduralMeshComponent& Mesh, int32 Index, UMaterialInterface* Material) const
+    {
+        Mesh.CreateMeshSection_LinearColor(Index, Vertices, Triangles, Normals, UVs, {}, Tangents, true);
+        Mesh.SetMaterial(Index, Material);
+    }
+};
 
 uint8 RotateOpenings(uint8 Mask, int32 Turns)
 {
@@ -142,7 +198,8 @@ AFSDungeonLayout::AFSDungeonLayout()
     static const ConstructorHelpers::FClassFinder<AActor> Tee(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_TJunction"));
     static const ConstructorHelpers::FClassFinder<AActor> Crossing(TEXT("/Game/Dungeon/Modules/BP_FS_Corridor_Cross"));
     static const ConstructorHelpers::FClassFinder<AActor> Plug(TEXT("/Game/Dungeon/Modules/BP_FS_Door_WallPlug"));
-    ModuleClasses = {Normal.Class, Boss.Class, Exit.Class, Line.Class, Right.Class, Left.Class, Tee.Class, Crossing.Class, Plug.Class};
+    static const ConstructorHelpers::FClassFinder<AActor> Gate(TEXT("/Game/Dungeon/Modules/BP_FS_Door_FinalGate"));
+    ModuleClasses = {Normal.Class, Boss.Class, Exit.Class, Line.Class, Right.Class, Left.Class, Tee.Class, Crossing.Class, Plug.Class, Gate.Class};
     static const ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Crate(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Crate.SM_Crate"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Barrel(TEXT("/Game/Medieval_Sewer_Dungeon/Static_Meshes/Props/SM_Barrel.SM_Barrel"));
@@ -152,6 +209,10 @@ AFSDungeonLayout::AFSDungeonLayout()
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cone(TEXT("/Engine/BasicShapes/Cone.Cone"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> Telegraph(TEXT("/Game/Combat/FX/MI_FX_Telegraph.MI_FX_Telegraph"));
+    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> FloorMaterial(TEXT("/Game/Medieval_Sewer_Dungeon/Materials_Instance/MI_Large_Room_Floor.MI_Large_Room_Floor"));
+    static const ConstructorHelpers::FObjectFinder<UMaterialInterface> WallMaterial(TEXT("/Game/Medieval_Sewer_Dungeon/Materials_Instance/MI_Large_Wall.MI_Large_Wall"));
+    ConnectorFloorMaterial = FloorMaterial.Object;
+    ConnectorWallMaterial = WallMaterial.Object;
     TrapPlateMesh = Cube.Object;
     CrateMesh = Crate.Object;
     BarrelMesh = Barrel.Object;
@@ -163,12 +224,12 @@ AFSDungeonLayout::AFSDungeonLayout()
     TelegraphMaterial = Telegraph.Object;
 }
 
-AActor* AFSDungeonLayout::SpawnModule(int32 Module, const FVector& Location, double Yaw)
+AActor* AFSDungeonLayout::SpawnModule(int32 Module, const FTransform& Transform)
 {
     FActorSpawnParameters Params;
     Params.Owner = this;
     Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    AActor* Actor = GetWorld()->SpawnActor<AActor>(ModuleClasses[Module], Location, FRotator(0, Yaw, 0), Params);
+    AActor* Actor = GetWorld()->SpawnActor<AActor>(ModuleClasses[Module], Transform, Params);
     if (Actor) SpawnedModules.Add(Actor);
     return Actor;
 }
@@ -240,10 +301,139 @@ bool AFSDungeonLayout::HasLivingCryptEnemies(const AActor* Player)
     return false;
 }
 
+bool AFSDungeonLayout::BuildModules(const FSDungeon::FPlan& Plan, double& TilePitch, TArray<FVector2D>& RoomExtents)
+{
+    FVector2D Extents[WallPlug];
+    double Clearance = 0;
+    // Measure the actual component hierarchy without using any visual mesh bounds.
+    for (int32 Shape = NormalRoom; Shape < WallPlug; ++Shape)
+    {
+        AActor* Probe = SpawnModule(Shape, FTransform(FVector(0, 0, -100000)));
+        if (!Probe) return false;
+        Extents[Shape] = FVector2D::ZeroVector;
+        // Keep any authored root scale in the world-space footprint measurement.
+        const FTransform ProbeFrame(Probe->GetActorQuat(), Probe->GetActorLocation());
+        for (int32 Side = 0; Side < UE_ARRAY_COUNT(DoorTags); ++Side)
+        {
+            const USceneComponent* Door = FindModulePoint(*Probe, DoorTags[Side]);
+            if (!Door) continue;
+            const FTransform Local = Door->GetComponentTransform().GetRelativeTransform(ProbeFrame);
+            const FVector Position = Local.GetLocation();
+            const FVector HalfMouth = Local.GetRotation().GetRightVector().GetSafeNormal2D()
+                * (DoorWidth * 0.5 * FMath::Abs(Local.GetScale3D().Y));
+            Extents[Shape].X = FMath::Max(Extents[Shape].X, FMath::Abs(Position.X) + FMath::Abs(HalfMouth.X));
+            Extents[Shape].Y = FMath::Max(Extents[Shape].Y, FMath::Abs(Position.Y) + FMath::Abs(HalfMouth.Y));
+            const double Slide = FMath::Abs(Side % 2 == 0 ? Position.Y : Position.X);
+            if (Slide > 0.1 || FMath::Abs(Position.Z) > 0.1 || !Local.GetScale3D().Equals(FVector::OneVector))
+            {
+                Clearance = FMath::Max(Clearance, FMath::Max(40.0 + 0.65 * Slide, 4.0 * FMath::Abs(Position.Z)));
+            }
+        }
+        Probe->Destroy();
+        SpawnedModules.Pop();
+        const double HalfCells = Shape == NormalRoom ? FSDungeon::NormalHalfSize.X + 0.5
+            : Shape == BossRoom ? FSDungeon::BossHalfSize.X + 0.5
+            : Shape == ExitRoom ? FSDungeon::ExitHalfSize.X + 0.5 : 0.5;
+        TilePitch = FMath::Max(TilePitch, FMath::Max(Extents[Shape].X, Extents[Shape].Y) / HalfCells);
+    }
+    TilePitch += Clearance;
+
+    TMap<FIntVector, FTransform> Ports;
+    const auto Seal = [&](int32 Shape, const FTransform& Port)
+    {
+        const FVector Scale(1, FMath::Abs(Port.GetScale3D().Y), FMath::Abs(Port.GetScale3D().Z));
+        return SpawnModule(Shape, FTransform(Port.GetRotation(), Port.GetLocation(), Scale));
+    };
+    const FRotator GateRotation = FVector(Plan.ExitDirection.X, Plan.ExitDirection.Y, 0).Rotation();
+    for (const FRoom& Room : Plan.Rooms)
+    {
+        const bool bExit = Room.Role == ERoomRole::Exit;
+        const EModule Shape = bExit ? ExitRoom : Room.Role == ERoomRole::Boss ? BossRoom : NormalRoom;
+        const double Yaw = bExit ? GateRotation.Yaw + 180 : 0;
+        AActor* Module = SpawnModule(Shape, FTransform(FRotator(0, Yaw, 0), TileCenter(Room.Center, TilePitch)));
+        if (!Module) return false;
+        RoomExtents.Add(Extents[Shape]);
+        if (bExit)
+        {
+            const USceneComponent* ExitPoint = FindModulePoint(*Module, TEXT("FS_ExitPoint"));
+            if (!ExitPoint) return false;
+            ExitCenter = ExitPoint->GetComponentLocation();
+        }
+        const uint8 Openings = FSDungeon::RoomOpenings(Plan, Room);
+        const int32 Rotation = (FMath::RoundToInt(Yaw / 90.0) % 4 + 4) % 4;
+        for (int32 Index = 0; Index < UE_ARRAY_COUNT(DoorTags); ++Index)
+        {
+            const USceneComponent* Door = FindModulePoint(*Module, DoorTags[Index]);
+            if (!Door) return false;
+            const FTransform Port = Door->GetComponentTransform();
+            const int32 Side = (Index + Rotation) % 4;
+            if (Openings & (1 << Side))
+            {
+                Ports.Add(PortKey(FSDungeon::DoorTile(Room, FSDungeon::Directions[Side]), Side), Port);
+                if (bExit)
+                {
+                    AActor* Gate = Seal(FinalGate, Port);
+                    if (!Gate) return false;
+                    Gate->Tags.AddUnique(GateTag);
+                }
+            }
+            else if (!Seal(WallPlug, Port)) return false;
+        }
+    }
+    for (const FIntPoint Tile : Plan.Corridors)
+    {
+        double Yaw = 0;
+        const uint8 Openings = FSDungeon::CorridorOpenings(Plan, Tile);
+        const EModule Shape = CorridorModule(Openings, Tile, Yaw);
+        if (Shape == WallPlug) return false;
+        AActor* Module = SpawnModule(Shape, FTransform(FRotator(0, Yaw, 0), TileCenter(Tile, TilePitch)));
+        if (!Module) return false;
+        const int32 Rotation = FMath::RoundToInt(Yaw / 90.0);
+        for (int32 Index = 0; Index < UE_ARRAY_COUNT(DoorTags); ++Index)
+        {
+            const int32 Side = (Index + Rotation) % 4;
+            if (!(Openings & (1 << Side))) continue;
+            const USceneComponent* Port = FindModulePoint(*Module, DoorTags[Index]);
+            if (!Port) return false;
+            Ports.Add(PortKey(Tile, Side), Port->GetComponentTransform());
+        }
+    }
+
+    FConnectorMesh FloorMesh, WallMesh;
+    int32 Connectors = 0;
+    for (const auto& Entry : Ports)
+    {
+        const int32 Side = Entry.Key.Z;
+        const FIntPoint Tile(Entry.Key.X, Entry.Key.Y);
+        const FTransform* Mate = Ports.Find(PortKey(Tile + FSDungeon::Directions[Side], (Side + 2) % 4));
+        if (!Mate) return false;
+        // Visit each seam once, from its positive-axis port.
+        if (Side >= 2 || Entry.Value.GetLocation().Equals(Mate->GetLocation(), 0.1)) continue;
+        constexpr double HalfWidth = DoorWidth * 0.5;
+        FloorMesh.AddLoft(Entry.Value, *Mate, -HalfWidth, HalfWidth, -40, 0);
+        WallMesh.AddLoft(Entry.Value, *Mate, -HalfWidth - 12, -HalfWidth + 12, 0, WallHeight);
+        WallMesh.AddLoft(Entry.Value, *Mate, HalfWidth - 12, HalfWidth + 12, 0, WallHeight);
+        ++Connectors;
+    }
+    if (Connectors > 0)
+    {
+        auto* Mesh = NewObject<UProceduralMeshComponent>(this, TEXT("AdaptiveCorridorSeams"));
+        Mesh->SetupAttachment(GetRootComponent());
+        Mesh->SetCanEverAffectNavigation(false);
+        Mesh->SetCollisionProfileName(TEXT("BlockAll"));
+        Mesh->SetGenerateOverlapEvents(false);
+        Mesh->RegisterComponent();
+        FloorMesh.AddSection(*Mesh, 0, ConnectorFloorMaterial);
+        WallMesh.AddSection(*Mesh, 1, ConnectorWallMaterial);
+    }
+    UE_LOG(LogTemp, Display, TEXT("Forgotten Crypt fitted %.1f cm grid spacing and %d adaptive corridor seams."), TilePitch, Connectors);
+    return true;
+}
+
 bool AFSDungeonLayout::Build(int32 RunId)
 {
     TArray<AActor*> LegacyGeometry;
-    AStaticMeshActor* Gate = nullptr;
+    TArray<AActor*> LegacyGates;
     TArray<ACharacter*> LegacyEnemies;
     for (TActorIterator<AActor> Actor(GetWorld()); Actor; ++Actor)
     {
@@ -253,7 +443,8 @@ bool AFSDungeonLayout::Build(int32 RunId)
         }
         if (Actor->ActorHasTag(GateTag))
         {
-            Gate = Cast<AStaticMeshActor>(*Actor);
+            LegacyGates.Add(*Actor);
+            LegacyGeometry.AddUnique(*Actor);
         }
         if (ACharacter* Enemy = Cast<ACharacter>(*Actor))
         {
@@ -263,7 +454,7 @@ bool AFSDungeonLayout::Build(int32 RunId)
             }
         }
     }
-    if (!Gate || LegacyGeometry.IsEmpty() || ModuleClasses.Contains(nullptr))
+    if (LegacyGeometry.IsEmpty() || ModuleClasses.Contains(nullptr))
     {
         return false;
     }
@@ -273,51 +464,24 @@ bool AFSDungeonLayout::Build(int32 RunId)
         return false;
     }
 
-    const FRotator GateRotation = TileCenter(Plan.ExitDirection).Rotation();
-    for (const FRoom& Room : Plan.Rooms)
-    {
-        const bool bExit = Room.Role == ERoomRole::Exit;
-        const EModule Shape = bExit ? ExitRoom : Room.Role == ERoomRole::Boss ? BossRoom : NormalRoom;
-        const double Yaw = bExit ? GateRotation.Yaw + 180 : 0;
-        AActor* Module = SpawnModule(Shape, TileCenter(Room.Center), Yaw);
-        if (!Module) return false;
-        if (bExit)
-        {
-            const USceneComponent* ExitPoint = FindModulePoint(*Module, TEXT("FS_ExitPoint"));
-            if (!ExitPoint) return false;
-            ExitCenter = ExitPoint->GetComponentLocation();
-        }
-        const uint8 Openings = FSDungeon::RoomOpenings(Plan, Room);
-        const int32 Rotation = (FMath::RoundToInt(Yaw / 90.0) % 4 + 4) % 4;
-        for (int32 Index = 0; Index < UE_ARRAY_COUNT(FSDungeon::Directions); ++Index)
-        {
-            const USceneComponent* Door = FindModulePoint(*Module, DoorTags[Index]);
-            if (!Door) return false;
-            if (!(Openings & (1 << ((Index + Rotation) % 4)))
-                && !SpawnModule(WallPlug, Door->GetComponentLocation(), Door->GetComponentRotation().Yaw))
-            {
-                return false;
-            }
-        }
-    }
-    for (const FIntPoint Tile : Plan.Corridors)
-    {
-        double Yaw = 0;
-        const EModule Shape = CorridorModule(FSDungeon::CorridorOpenings(Plan, Tile), Tile, Yaw);
-        if (Shape == WallPlug || !SpawnModule(Shape, TileCenter(Tile), Yaw)) return false;
-    }
+    TArray<FVector2D> RoomExtents;
+    double TilePitch = 0;
+    if (!BuildModules(Plan, TilePitch, RoomExtents)) return false;
 
     FRandomStream Random(RunId);
     TArray<AFSCryptEnemy*> Spawned;
     const auto SpawnEnemy = [&](const FRoom& Room, EFSCryptRole EnemyRole, FIntPoint Offset, FName Tag = NAME_None, int32 RoomSlot = 0)
     {
-        const FTransform Transform(FRotator::ZeroRotator, TileCenter(Room.Center + Offset, 94));
+        const FVector2D Extent = RoomExtents[&Room - Plan.Rooms.GetData()];
+        const FVector Center = TileCenter(Room.Center, TilePitch);
+        const FTransform Transform(FRotator::ZeroRotator,
+            Center + FVector(Offset.X * Extent.X * 0.4, Offset.Y * Extent.Y * 0.4, 94));
         AFSCryptEnemy* Enemy = GetWorld()->SpawnActorDeferred<AFSCryptEnemy>(AFSCryptEnemy::StaticClass(), Transform,
             this, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
         if (Enemy)
         {
             Enemy->SetActorTransform(Transform);
-            Enemy->Configure(EnemyRole, TileCenter(Room.Center), FVector2D((Room.HalfSize.X + 0.5) * TileSize, (Room.HalfSize.Y + 0.5) * TileSize),
+            Enemy->Configure(EnemyRole, Center, Extent,
                 Random.GetUnsignedInt(), RoomSlot);
             if (!Tag.IsNone())
             {
@@ -372,12 +536,13 @@ bool AFSDungeonLayout::Build(int32 RunId)
 
     for (const FRoom& Room : Plan.Rooms)
     {
-        const FVector Center = TileCenter(Room.Center);
+        const FVector Center = TileCenter(Room.Center, TilePitch);
         if (Room.Role == ERoomRole::Exit)
         {
             continue;
         }
-        const FVector Corner = TileCenter(Room.Center + FIntPoint(-Room.HalfSize.X, Room.HalfSize.Y));
+        const FVector2D Extent = RoomExtents[&Room - Plan.Rooms.GetData()];
+        const FVector Corner = Center + FVector(-Extent.X * 0.8, Extent.Y * 0.8, 0);
 
         switch (Room.Role)
         {
@@ -405,12 +570,10 @@ bool AFSDungeonLayout::Build(int32 RunId)
         }
     }
 
-    Gate->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
-    Gate->SetActorLocationAndRotation(TileCenter(Plan.GateTile, WallHeight / 2.0), GateRotation, false, nullptr, ETeleportType::TeleportPhysics);
-    Gate->SetActorScale3D(FVector(0.35, TileSize / 100.0, WallHeight / 100.0));
-
+    const FRotator GateRotation = FVector(Plan.ExitDirection.X, Plan.ExitDirection.Y, 0).Rotation();
     AddLabel(*this, TEXT("ExitLabel"), ExitCenter + FVector(0, 0, 105), GateRotation.Yaw + 180, TEXT("RETURN TO GUILD"));
 
+    for (AActor* Gate : LegacyGates) Gate->Tags.Remove(GateTag);
     for (AActor* Actor : LegacyGeometry)
     {
         Actor->SetActorHiddenInGame(true);

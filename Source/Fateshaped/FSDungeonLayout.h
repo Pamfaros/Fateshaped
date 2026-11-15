@@ -10,6 +10,7 @@ class UPointLightComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+namespace FSDungeon { struct FPlan; }
 
 UCLASS(NotBlueprintable)
 class AFSDungeonLayout : public AActor
@@ -35,7 +36,8 @@ private:
     virtual void Tick(float DeltaSeconds) override;
     virtual void Destroyed() override;
     bool Build(int32 RunId);
-    AActor* SpawnModule(int32 Module, const FVector& Location, double Yaw = 0);
+    bool BuildModules(const FSDungeon::FPlan& Plan, double& TilePitch, TArray<FVector2D>& RoomExtents);
+    AActor* SpawnModule(int32 Module, const FTransform& Transform);
     void AddTrap(const FVector& Center, bool bSpikes, bool bAlongX);
     void AddChest(const FVector& Center);
     void UpdateChest(const AActor& Player);
@@ -102,6 +104,12 @@ private:
 
     UPROPERTY()
     TObjectPtr<UMaterialInterface> TelegraphMaterial;
+
+    UPROPERTY()
+    TObjectPtr<UMaterialInterface> ConnectorFloorMaterial;
+
+    UPROPERTY()
+    TObjectPtr<UMaterialInterface> ConnectorWallMaterial;
 
     FVector ExitCenter = FVector::ZeroVector;
 };

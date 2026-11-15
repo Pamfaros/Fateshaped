@@ -487,11 +487,11 @@ The second run may use **the same map** with a small encounter variation (differ
 
 The Forgotten Crypt assembles the prepared Actor Blueprints in `/Game/Dungeon/Modules`. Use the Components viewport to edit their geometry, materials, lighting and portal. The normal room also serves as the entrance and hosts encounter, trap or cache roles. The boss and exit have dedicated templates.
 
-- Keep the module origin at the center of the floor and the walkable surface at local Z = 0. On the 240 cm grid the normal, boss and exit room footprints are 5 × 5, 7 × 7 and 3 × 3 tiles.
-- Room doorway components are `Door_PX`, `Door_PY`, `Door_NX` and `Door_NY`. Keep one centered on each wall with its existing `FS_Door_*` tag and outward orientation. The generator places `BP_FS_Door_WallPlug` at unused doorways.
-- The straight, right bend, left bend, T and cross corridor Blueprints each occupy one grid tile. Preserve the local ports when editing them. The generator rotates the templates by 90° increments.
+- Keep each module origin on its walkable floor. The planner reserves 5 × 5, 7 × 7 and 3 × 3 logical cells for normal, boss and exit rooms. World spacing follows the authored port positions. Mesh components keep their authored scale.
+- Set `Door_PX`, `Door_PY`, `Door_NX` and `Door_NY` at floor level in the actual openings. Keep their `FS_Door_*` tags and point each local X axis outward along its named side. Scale Y/Z on a marker to specify opening width and height relative to 240 × 460 cm. The generator places `BP_FS_Door_WallPlug` at unused room ports.
+- The straight, right bend, left bend, T and cross corridor Blueprints each occupy one logical cell. Blue arrows show their independent Scene Component ports in the Blueprint viewport. Move the parent `Door_*` component when changing an opening. The generator rotates modules in 90° steps and builds collidable seams between their actual port transforms.
 - An uninterrupted corridor has at least two straight tiles between consecutive corner modules. An obstacle-routing connection can use up to four bends.
-- In `BP_FS_Room_Exit`, the tagged `ExitTrigger` component sets the completion point. The existing encounter gate still controls access.
+- In `BP_FS_Room_Exit`, the tagged `ExitTrigger` component sets the completion point. `BP_FS_Door_FinalGate` fits the connected exit doorway and uses the encounter's existing unlock condition.
 
 ### 13.2. Long-Term Procedural Generation [POST-JAM]
 
