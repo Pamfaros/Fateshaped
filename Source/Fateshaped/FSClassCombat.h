@@ -120,7 +120,8 @@ private:
     void PlaySharedSound(const TCHAR* Name, bool bUI = false) const;
     void UpdateFootsteps(float DeltaTime);
     void UpdateDefeat(float DeltaTime);
-    void PlayReaction(const TCHAR* Name, float Duration);
+    void PlayReaction(const TCHAR* Name);
+    void PlayTimedAnimation(class UAnimSequenceBase* Animation, float Window);
     void Rumble(float Intensity, float Duration);
     void StopRumble();
     void EquipClassVisual();
@@ -168,6 +169,7 @@ private:
     float Age = 0;
     float PreviousAge = 0;
     float EndTime = 0;
+    float ActionClockRate = 1;
     float MoveDistance = 0;
     float MoveTime = 0;
     float MoveAge = 0;

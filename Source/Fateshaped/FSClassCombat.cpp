@@ -29,8 +29,8 @@
 namespace
 {
 constexpr int32 Basic = 0, Dodge = 1, First = 2, Second = 3;
-constexpr float SharedDodgeDistance = 340, SharedDodgeTime = 0.90f;
-constexpr float DefeatPlaybackTime = 2.0f;
+constexpr float SharedDodgeDistance = 340, BackstepDistance = 320;
+constexpr float BackstepImmunity = 0.55f, BackstepRecovery = 0.50f;
 const TCHAR* AxeClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack");
 const TCHAR* SwordClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01");
 const TCHAR* FollowClip = TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02");
@@ -414,11 +414,10 @@ void UFSClassCombat::UpdateDefeat(float DeltaTime)
         {
             DefeatDuration = Clip->GetPlayLength();
             Mesh->PlayAnimation(Clip, false);
-            Mesh->SetPlayRate(DefeatDuration / DefeatPlaybackTime);
         }
     }
     const float End = DefeatAge + DeltaTime;
-    if (DefeatDuration > 0 && DefeatAge < DefeatPlaybackTime && End >= DefeatPlaybackTime)
+    if (DefeatDuration > 0 && DefeatAge < DefeatDuration && End >= DefeatDuration)
     {
         Mesh->SetPosition(DefeatDuration, false);
         Mesh->Stop();
@@ -426,12 +425,12 @@ void UFSClassCombat::UpdateDefeat(float DeltaTime)
     DefeatAge = End;
 }
 
-void UFSClassCombat::PlayReaction(const TCHAR* Name, float Duration)
+void UFSClassCombat::PlayReaction(const TCHAR* Name)
 {
     const FString Path = FString::Printf(TEXT("/Game/Combat/SharedAnimations/AN_FS_Anim_Warrior_%s.AN_FS_Anim_Warrior_%s"), Name, Name);
     if (auto* Clip = LoadObject<UAnimSequenceBase>(nullptr, *Path))
     {
-        UFSCharacterActions::PlayActionAnimation(&Player(), Clip, Clip->GetPlayLength() / Duration);
+        UFSCharacterActions::PlayActionAnimation(&Player(), Clip, 1.0f);
     }
 }
 
@@ -465,6 +464,7 @@ void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
     SetBasicAttackMovementLock(IsBasicAttacking());
     Age = 0;
     EndTime = End;
+    ActionClockRate = 1.0f;
     bCommitted = false;
     bHadTurnCue = false;
     HitActors.Reset();
@@ -476,7 +476,7 @@ void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
     {
         if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, Clip))
         {
-            UFSCharacterActions::PlayActionAnimation(&Player(), Animation, Animation->GetPlayLength() / FMath::Max(0.1f, End));
+            PlayTimedAnimation(Animation, End);
         }
     }
     if (Next == EMove::ShieldHold || Next == EMove::StoneHold || Next == EMove::OrbHold || Next == EMove::BendHold)
@@ -484,6 +484,13 @@ void UFSClassCombat::Start(EMove Next, float End, const TCHAR* Clip)
         UFSCharacterActions::BeginAttackFacing(&Player());
         PlaySound(TEXT("SFX_Swing"));
     }
+}
+
+void UFSClassCombat::PlayTimedAnimation(UAnimSequenceBase* Animation, float Window)
+{
+    // Keep the clip at its authored rate and stretch the action's contact and travel timeline with it.
+    ActionClockRate = Window / FMath::Max(Window, Animation->GetPlayLength());
+    UFSCharacterActions::PlayActionAnimation(&Player(), Animation, 1.0f);
 }
 
 void UFSClassCombat::Finish()
@@ -600,7 +607,7 @@ void UFSClassCombat::Attack()
     if (Unavailable() || bSelecting || !Branch() || !Grounded()) return;
     if (Move == EMove::Slip && Age >= 0.25f)
     {
-        BufferedBasicUntil = GetWorld()->GetTimeSeconds() + 0.20;
+        BufferedBasicUntil = GetWorld()->GetTimeSeconds() + (EndTime - Age) / ActionClockRate + 0.20;
         return;
     }
     if (Move != EMove::Idle) return;
@@ -629,20 +636,18 @@ void UFSClassCombat::Evade()
     const FVector Direction = MoveInput(bBackstep ? -Player().GetActorForwardVector() : AimDirection());
     Cancel();
     Player().GetCharacterMovement()->bOrientRotationToMovement = false;
-    if (!bBackstep) Player().SetActorRotation(Direction.Rotation());
-    const float Duration = bBackstep ? 0.30f : SharedDodgeTime;
-    Start(EMove::Dodge, Duration, bBackstep ? DashClip : nullptr);
-    if (!bBackstep)
+    if (!bBackstep || FVector::DotProduct(Direction, Player().GetActorForwardVector()) > -0.8)
     {
-        DodgeSequence = LoadObject<UAnimSequence>(nullptr, RollClip);
-        if (DodgeSequence)
-        {
-            UFSCharacterActions::PlayActionAnimation(&Player(), DodgeSequence, DodgeSequence->GetPlayLength() / Duration);
-        }
+        Player().SetActorRotation(Direction.Rotation());
     }
+    DodgeSequence = LoadObject<UAnimSequence>(nullptr, bBackstep ? DashClip : RollClip);
+    const float Duration = DodgeSequence ? DodgeSequence->GetPlayLength() : (bBackstep ? 0.97f : 0.90f);
+    Start(EMove::Dodge, Duration);
+    if (DodgeSequence) UFSCharacterActions::PlayActionAnimation(&Player(), DodgeSequence, 1.0f);
     PlaySharedSound(TEXT("EvadeCloth"));
-    Travel(Direction, SharedDodgeDistance * (bBackstep ? 0.60f : 1.0f), Duration);
-    Cooldown[Dodge] = GetWorld()->GetTimeSeconds() + (bBackstep ? 0.80 : Branch() == 'M' ? 1.0 : EndTime);
+    Travel(Direction, bBackstep ? BackstepDistance : SharedDodgeDistance, Duration);
+    const float Recovery = bBackstep ? BackstepRecovery : Branch() == 'M' ? 0.10f : 0.0f;
+    Cooldown[Dodge] = GetWorld()->GetTimeSeconds() + Duration + Recovery;
 }
 
 void UFSClassCombat::SkillOne()
@@ -655,7 +660,11 @@ void UFSClassCombat::SkillOne()
         Heading = Player().GetActorForwardVector().GetSafeNormal2D();
         UFSCharacterActions::BeginAttackFacing(&Player());
         Player().SetActorRotation(Heading.Rotation());
-        Start(EMove::Leap, LeapDuration, LeapClip);
+        Start(EMove::Leap, LeapDuration);
+        if (auto* Takeoff = LoadObject<UAnimSequenceBase>(nullptr, LeapClip))
+        {
+            UFSCharacterActions::PlayActionAnimation(&Player(), Takeoff, 1.0f);
+        }
         Travel(Heading, 320, LeapDuration, 55);
         auto* Movement = Player().GetCharacterMovement();
         PreLeapFlySpeed = Movement->MaxFlySpeed;
@@ -968,7 +977,7 @@ void UFSClassCombat::PlayLeapStrike()
     bLeapStrikeStarted = true;
     if (auto* Animation = LoadObject<UAnimSequenceBase>(nullptr, FollowClip))
     {
-        UFSCharacterActions::PlayActionAnimation(&Player(), Animation, Animation->GetPlayLength() / (LeapDuration - LeapStrikeStart));
+        PlayTimedAnimation(Animation, LeapDuration - LeapStrikeStart);
     }
 }
 
@@ -1084,13 +1093,16 @@ void UFSClassCombat::TickShots(float DeltaTime)
 
 void UFSClassCombat::TickAction(float DeltaTime)
 {
+    const float ActionDeltaTime = DeltaTime * ActionClockRate;
     PreviousAge = Age;
-    Age = FMath::Min(EndTime, Age + DeltaTime);
+    Age = FMath::Min(EndTime, Age + ActionDeltaTime);
     const double Now = GetWorld()->GetTimeSeconds();
     if (MoveTime > 0)
     {
         const float From = MoveAge / MoveTime;
-        MoveAge = FMath::Min(MoveAge + DeltaTime, MoveTime);
+        // An Orb release can overlap a Weave Step that started before the cast.
+        const float TravelDeltaTime = Move == EMove::Orb ? DeltaTime : ActionDeltaTime;
+        MoveAge = FMath::Min(MoveAge + TravelDeltaTime, MoveTime);
         const float To = MoveAge / MoveTime;
         const bool bCurve = Move == EMove::Pivot;
         const FVector Direction = bCurve ? FMath::Lerp(Heading, TravelHeading, (From + To) * 0.5f).GetSafeNormal2D() : TravelHeading;
@@ -1146,7 +1158,7 @@ void UFSClassCombat::TickAction(float DeltaTime)
     case EMove::Axe: BladeContact(0.25f, 0.42f, 22, 34, 3); break;
     case EMove::Sword: BladeContact(0.14f, 0.24f, 16, 22, 2); break;
     case EMove::Dodge:
-        if (Branch() == 'V' && Age >= 0.24f) SetFlag(TEXT("bDodging"), false);
+        if (Branch() == 'V' && Age >= BackstepImmunity) SetFlag(TEXT("bDodging"), false);
         break;
     case EMove::Leap:
         if (!bLeapStrikeStarted && Age >= LeapStrikeStart) PlayLeapStrike();
@@ -1412,7 +1424,7 @@ float UFSClassCombat::GuardDamage(float Damage, AActor* Causer)
     const float Incoming = Damage;
     if (!bBlockable)
     {
-        if (Move == EMove::Idle && Damage < Value(TEXT("Health"))) PlayReaction(TEXT("Get_Hit_1"), 0.32f);
+        if (Move == EMove::Idle && Damage < Value(TEXT("Health"))) PlayReaction(TEXT("Get_Hit_1"));
         return Damage;
     }
     const FVector Offset = (Causer->GetActorLocation() - Player().GetActorLocation()).GetSafeNormal2D();
@@ -1442,7 +1454,7 @@ float UFSClassCombat::GuardDamage(float Damage, AActor* Causer)
     }
     else if (Move == EMove::Idle && Damage < Value(TEXT("Health")))
     {
-        PlayReaction(Dot >= 0.64f ? TEXT("Get_Hit_1") : TEXT("Get_Hit_2"), 0.32f);
+        PlayReaction(Dot >= 0.64f ? TEXT("Get_Hit_1") : TEXT("Get_Hit_2"));
     }
     return Damage;
 }
