@@ -1,6 +1,6 @@
 # Fateshaped implementation tracker
 
-**Current task** — FS-125 scales the HUD to the viewport and adds mouse-wheel and vertical arrow navigation at the altar. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
+**Current task** — FS-130 integrates the custom Gerald model and hovering idle at Guild reception. **Next P0:** complete a normal-input packaged expedition through Gerald and verify reward persistence after relaunch.
 
 **Handover authorization / usage:** the owner's 2026-11-13 request authorizes the audit and next P0 milestone, superseding the previous Claude checkpoint for this batch. Historical dollar figures below describe the previous workflow only. No connected client tool exposes Codex usage or balance; current spend is unknown and no cross-provider credit assumption is made.
 
@@ -80,6 +80,7 @@ Keep at least $4 for integration, packaging and critical fixes. Stop for an owne
 - **FS-127 · Shared footstep Sound Cue — COMPILED + PIE_TESTED.** Both maps use `SC_Footstep` with the existing pitch variation. The audio mixer reported active cue voices and tile samples in each map.
 - **FS-128 · Shared jump and planted basic attacks — COMPILED + PIE_TESTED.** All 12 classes completed the shared jump cycle. Axe, sword and Spark held position during their basic attacks and resumed movement afterwards. Hit, miss and blocked projectile cases passed.
 - **FS-129 · Authored player leg motion — COMPILED + PIE_TESTED.** Removed the post-slot foot placement pass from the shared player AnimBP. Verified the three Fantasy Pack jump clips and sampled foot motion for all 12 classes.
+- **FS-130 · Gerald's custom fairy and hovering idle — CREATED + PIE_TESTED.** Swapped the visible mesh on the existing Gerald actor. Added a seamless 4-second idle and a wing-only translucency effect. The scripted Guild introduction, contract, portal, reward and return passed. Facial blinking is pending facial rig support. Packaged testing remains pending.
 
 ## Stage 0 — Audit
 
